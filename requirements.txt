@@ -1,0 +1,7 @@
+plaster_pastedeploy
+pyramid
+pyramid_tm
+pyramid_zodbconn
+transaction
+persistent
+ZODB

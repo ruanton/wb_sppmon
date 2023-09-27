@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.2", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wb_sppmon"
+authors = [
+    {name = "Anton Benderskiy", email = "loderan@ruservice.ru"}
+]
+description = "Wildberries SPP monitor"
+requires-python = ">=3.11"
+keywords = ["pyramid", "pylons"]
+license = {text = "MIT License"}
+classifiers = [
+    "Programming Language :: Python",
+    "Framework :: Pyramid",
+]
+dynamic = ["version", "readme", "dependencies"]
+
+[project.scripts]
+wb_sppmon = "wb_sppmon.wb_sppmon:main"
+
+[project.entry-points]
+"paste.app_factory" = {main = "wb_sppmon:main"}
+
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}
+readme = {file = ["README.rst", "CHANGES.rst"], content-type = "text/x-rst"}
+dependencies = {file = "requirements.txt"}
+
+[tool.setuptools.packages.find]
+exclude = ["tests"]
+namespaces = false
