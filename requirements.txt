@@ -1,3 +1,6 @@
+requests
+urllib3
+simplejson
 plaster_pastedeploy
 pyramid
 pyramid_tm

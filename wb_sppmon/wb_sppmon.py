@@ -1,6 +1,9 @@
 import argparse
 from pyramid.paster import bootstrap, setup_logging
 
+# local imports
+from .wildberries import fetch_product_details, ProductDetails
+
 
 def _read_lines(filename: str) -> list[str]:
     """
@@ -41,7 +44,10 @@ class ProductCategoryParams:
                 raise ValueError(f'not 0 <= {self.price_step} <= {self.price_max} - {self.price_min}')
 
         except Exception as e:
-            raise ValueError(f'invalid product category params: {input_line}', e)
+            raise ValueError(f'invalid product category params: {input_line}') from e
+
+    def __str__(self):
+        return f'{self.category}, {self.product}, {self.price_min}, {self.price_max}, {self.price_step}'
 
 
 class Params:
@@ -64,6 +70,32 @@ class Params:
         product_categories_lines = _read_lines(settings['product_categories'])
         self.product_categories = [ProductCategoryParams(x) for x in product_categories_lines]
 
+    def __str__(self) -> str:
+        lines = [
+            f'admin emails: {", ".join(self.admin_emails)}',
+            f'report emails: {", ".join(self.report_emails)}',
+            f'article numbers: {", ".join(self.article_numbers)}',
+            f'product categories:'
+        ]
+        for cat in self.product_categories:
+            lines.append(f'  {cat}')
+        return '\n'.join(lines)
+
+
+def fetch_product_details_for_articles(params: Params) -> dict[str, ProductDetails | Exception]:
+    """
+    Try to fetch product details for configured articles
+    @param params: input parameters with article numbers
+    @return: mapping article => ProductDetails or Exception
+    """
+    article_to_product_details = {}
+    for article in params.article_numbers:
+        try:
+            article_to_product_details[article] = fetch_product_details(article)
+        except Exception as ex:
+            article_to_product_details[article] = ex
+    return article_to_product_details
+
 
 def main():
     parser = argparse.ArgumentParser(description='Wildberries SPP Monitor.')
@@ -79,13 +111,14 @@ def main():
         # load and validate input params
         params = Params(settings)
 
-        print('Inputs:')
-        print(f'  admin emails: {", ".join(params.admin_emails)}')
-        print(f'  report emails: {", ".join(params.report_emails)}')
-        print(f'  article numbers: {", ".join(params.article_numbers)}')
-        print(f'  product categories:')
-        for cat in params.product_categories:
-            print(f'    {cat.category}, {cat.product}, {cat.price_min}, {cat.price_max}, {cat.price_step}')
+        # try to fetch product details for all articles from input params
+        article_to_product_details = fetch_product_details_for_articles(params)
+
+        print(f'Inputs:\n{params}')
+        print(f'Fetched details for products:')
+        print('\n'.join([f'  {v}' for v in article_to_product_details.values() if not isinstance(v, Exception)]))
+        print(f'Failed to fetch details for products:')
+        print('\n'.join([f'  {x}: {v}' for x, v in article_to_product_details.items() if isinstance(v, Exception)]))
 
 
 if __name__ == '__main__':
