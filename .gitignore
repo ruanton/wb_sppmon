@@ -2,6 +2,8 @@ __pycache__
 venv
 !zodb-data
 zodb-data/*
+config/*
+!config/samples
 production.ini
 
 

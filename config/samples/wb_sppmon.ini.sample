@@ -5,7 +5,19 @@
 
 [app:main]
 use = egg:wb_sppmon
-zodbconn.uri = file://%(here)s/zodb-data/Data.fs?connection_cache_size=20000
+zodbconn.uri = file://%(here)s/../zodb-data/Data.fs?connection_cache_size=20000
+
+# file with email addresses where to send script errors
+admin_emails = %(here)s/admin_emails.lst
+
+# file with email addresses where to send SPP changes
+report_emails = %(here)s/report_emails.lst
+
+# file with WB article numbers to monitor
+article_numbers = %(here)s/article_numbers.lst
+
+# file with WB product categories to monitor
+product_categories = %(here)s/product_categories.lst
 
 
 ###

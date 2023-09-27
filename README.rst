@@ -1,4 +1,4 @@
-Wildberries SPP monitor
+Wildberries SPP Monitor
 =======================
 
 Getting Started
@@ -22,15 +22,19 @@ Getting Started
 
     ./venv/bin/pip install -e .
 
-- Create configuration files from samples::
-
-    cp production.ini.sample production.ini
-
 - Create directory for ZODB::
 
     mkdir zodb-data
 
+- Create configuration files from samples::
+
+    cp config/samples/wb_sppmon.ini.sample config/wb_sppmon.ini
+    cp config/samples/admin_emails.lst.sample config/admin_emails.lst
+    cp config/samples/report_emails.lst.sample config/report_emails.lst
+    cp config/samples/article_numbers.lst.sample config/article_numbers.lst
+    cp config/samples/product_categories.lst.sample config/product_categories.lst
+
 - Run project's script::
 
-    ./venv/bin/wb_sppmon production.ini
+    ./venv/bin/wb_sppmon config/wb_sppmon.ini
 
