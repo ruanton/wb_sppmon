@@ -1,8 +1,11 @@
+import logging
 import argparse
 from pyramid.paster import bootstrap, setup_logging
 
 # local imports
 from .wildberries import fetch_product_details, ProductDetails
+
+log = logging.getLogger(__name__)
 
 
 def _read_lines(filename: str) -> list[str]:
@@ -108,10 +111,10 @@ def main():
     with bootstrap(args.config_uri) as env:
         settings = env['registry'].settings
 
-        # load and validate input params
+        log.info('load and validate input params')
         params = Params(settings)
 
-        # try to fetch product details for all articles from input params
+        log.info('try to fetch product details for all articles from input params')
         article_to_product_details = fetch_product_details_for_articles(params.product_articles)
 
         print(f'=== Inputs:\n{params}\n')
