@@ -9,18 +9,22 @@ from urllib3.exceptions import ProtocolError, MaxRetryError, NewConnectionError
 
 URL_WB_DETAILS = (
     'https://card.wb.ru/cards/detail?'
-    'appType=1&curr=rub&dest=-1257786&regions=80,38,83,4,64,33,68,70,30,40,86,75,69,1,31,66,110,48,22,71,114'
-    '&spp=32&nm={article}'
+    'appType=1&spp=32&curr=rub&dest=-1257786&regions=80,38,83,4,64,33,68,70,30,40,86,75,69,1,31,66,110,48,22,71,114'
+    '&nm={article}'
 )
+"""Returns JSON with details about the product with the given article"""
 
 
-URL1 = 'https://static-basket-01.wb.ru/vol0/data/main-menu-ru-ru-v2.json'
+URL_WB_CATEGORIES = 'https://static-basket-01.wb.ru/vol0/data/main-menu-ru-ru-v2.json'
+"""Returns JSON with all product categories"""
 
 
-URL2 = (
+URL_WB_FILTERS = (
     'https://catalog.wb.ru/catalog/children_shoes/v4/filters?'
-    'appType=1&cat=8225&curr=rub&dest=-1257786&regions=80,38,83,4,64,33,68,70,30,40,86,75,69,1,31,66,110,48,22,71,114'
+    'appType=1&curr=rub&dest=-1257786&regions=80,38,83,4,64,33,68,70,30,40,86,75,69,1,31,66,110,48,22,71,114'
+    '&{cat}'  # category subquery like "cat=8225" as specified in category details
 )
+"""Returns the available filters including a list of subcategories for a given category"""
 
 
 class WildberriesWebsiteError(Exception):
@@ -36,14 +40,14 @@ class NoProductsFound(WildberriesWebsiteError):
 
 
 class SeveralProductsFound(WildberriesWebsiteError):
-    """Several products returned for given article"""
+    """Several products returned when one was expected"""
 
 
 def _json_serial(obj):
     """JSON serializer for objects not serializable by default json code"""
     if isinstance(obj, (datetime.datetime, datetime.date)):
         return obj.isoformat()
-    raise TypeError(f'Type {type(obj)} not serializable')
+    raise TypeError(f'type {type(obj)} is not serializable')
 
 
 def json_dumps(obj) -> str:
@@ -71,7 +75,7 @@ class ProductDetails:
     """Wildberries product details"""
     def __init__(
             self, article: str, name: str, price: Decimal, price_sale: Decimal,
-            discount_basic: Decimal, discount_client: Decimal
+            discount_base: Decimal, discount_client: Decimal
     ):
         """
         Fetch from some details about product by product article.
@@ -79,14 +83,14 @@ class ProductDetails:
         @param name: product name
         @param price: base product price
         @param price_sale: discounted product price
-        @param discount_basic: base discount
+        @param discount_base: base discount
         @param discount_client: SPP
         """
         self.article = article
         self.name = name
         self.price = price
         self.price_sale = price_sale
-        self.discount_basic = discount_basic
+        self.discount_base = discount_base
         self.discount_client = discount_client
 
     def __str__(self):
@@ -94,7 +98,7 @@ class ProductDetails:
 
 
 def fetch_product_details(article: str) -> ProductDetails:
-    """Fetch some product details by article from wildberries.ru"""
+    """Fetch some product details from wildberries.ru by article"""
     try:
         url = URL_WB_DETAILS.format(article=article)
         resp = _http_get(url)
@@ -117,7 +121,7 @@ def fetch_product_details(article: str) -> ProductDetails:
             name=product['name'],
             price=Decimal(str(int(product['priceU']) / 100.0)),
             price_sale=Decimal(str(int(product['salePriceU']) / 100.0)),
-            discount_basic=Decimal(str(int(product['extended']['basicSale']))),
+            discount_base=Decimal(str(int(product['extended']['basicSale']))),
             discount_client=Decimal(str(int(product['extended']['clientSale']))),
         )
         if product_details.article != article:

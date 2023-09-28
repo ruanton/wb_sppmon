@@ -14,7 +14,7 @@ admin_emails = %(here)s/admin_emails.lst
 report_emails = %(here)s/report_emails.lst
 
 # file with WB article numbers to monitor
-article_numbers = %(here)s/article_numbers.lst
+product_articles = %(here)s/product_articles.lst
 
 # file with WB product categories to monitor
 product_categories = %(here)s/product_categories.lst
