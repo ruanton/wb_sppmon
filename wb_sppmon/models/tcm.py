@@ -7,7 +7,7 @@ import ZODB.Connection
 
 class TransactionContextManager(object):
     """PEP 343 context manager"""
-    def __init__(self, conn: ZODB.Connection.Connection, note=None):
+    def __init__(self, conn: ZODB.Connection.Connection, note: str = None):
         self.conn = conn
         self.note = note
 
