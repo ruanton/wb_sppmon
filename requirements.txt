@@ -8,3 +8,4 @@ pyramid_zodbconn
 transaction
 persistent
 ZODB
+BTrees
