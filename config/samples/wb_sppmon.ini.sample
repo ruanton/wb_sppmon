@@ -40,7 +40,7 @@ handlers = console
 
 [logger_wb_sppmon]
 level = INFO
-handlers = console
+handlers =
 qualname = wb_sppmon
 
 [handler_console]
