@@ -1,11 +1,7 @@
-import time
-import datetime
-import random
-import requests
-import simplejson
 from decimal import Decimal
-from requests.exceptions import ConnectionError
-from urllib3.exceptions import ProtocolError, MaxRetryError, NewConnectionError
+
+# local imports
+from helpers import json_dumps, http_get
 
 URL_WB_DETAILS = (
     'https://card.wb.ru/cards/detail?'
@@ -43,34 +39,6 @@ class SeveralProductsFound(WildberriesWebsiteError):
     """Several products returned when one was expected"""
 
 
-def _json_serial(obj):
-    """JSON serializer for objects not serializable by default json code"""
-    if isinstance(obj, (datetime.datetime, datetime.date)):
-        return obj.isoformat()
-    raise TypeError(f'type {type(obj)} is not serializable')
-
-
-def json_dumps(obj) -> str:
-    return simplejson.dumps(obj, indent=True, ensure_ascii=False, use_decimal=True, default=_json_serial)
-
-
-def _http_get(url: str, retries: int = 5, random_retry_pause: float = 0.5, **kwargs):
-    """Perform HTTP-get request, retry several times on network error"""
-    while True:
-        try:
-            resp = requests.get(url, **kwargs)
-            if resp.status_code == 200 or retries <= 0:
-                if resp.status_code != 200:
-                    raise WildberriesWebsiteError(f'status_code={resp.status_code}')
-                return resp
-        except (ConnectionResetError, ProtocolError, ConnectionError, MaxRetryError, NewConnectionError, TimeoutError):
-            if retries <= 0:
-                raise
-        if random_retry_pause > 0:
-            time.sleep(random.uniform(random_retry_pause/2.0, random_retry_pause))
-        retries -= 1
-
-
 class ProductDetails:
     """Wildberries product details"""
     def __init__(
@@ -101,7 +69,7 @@ def fetch_product_details(article: str) -> ProductDetails:
     """Fetch some product details from wildberries.ru by article"""
     try:
         url = URL_WB_DETAILS.format(article=article)
-        resp = _http_get(url)
+        resp = http_get(url)
         details = resp.json()
         if 'data' not in details:
             raise UnexpectedResponse(f'no "data" in json: {json_dumps(details)}')
