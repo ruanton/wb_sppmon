@@ -50,7 +50,7 @@ class SeveralProductsFound(WildberriesWebsiteError):
 
 def fetch_product_details(article: str) -> tuple[datetime, dict[str, Any]]:
     """
-    Fetch some product details from Wildberries website by article.
+    Fetch some product details from the Wildberries website by article.
     @param article: product article
     @return: date/time the fetching started, dictionary of the product properties fetched from Wildberries
     """
@@ -91,3 +91,45 @@ def fetch_product_details(article: str) -> tuple[datetime, dict[str, Any]]:
 
     except Exception as e:
         raise WildberriesWebsiteError(f'cannot fetch product details for article {article}: {e}') from e
+
+
+def fetch_categories() -> tuple[datetime, list[dict[str, int | str | bool]]]:
+    """
+    Fetch and parse all product categories from the Wildberries website.
+    Ignore a tree structure in json returned from Wildberries.
+    @return: date/time the fetching started, list of product categories
+    """
+    try:
+        log.debug(f'fetch product categories from the Wildberries website and parse response')
+        fetch_started_at = datetime.now(tz=timezone.utc)
+        resp = http_get(URL_WB_CATEGORIES)
+        json_resp = resp.json()
+
+        # parse json response
+        categories: list[dict[str, int | str | bool]] = []
+
+        def parse_categories(json_categories: list):
+            for cat in json_categories:
+                try:
+                    categories.append({
+                        'id': cat['id'],
+                        'parent': cat['parent'] if 'parent' in cat else None,
+                        'name': cat['name'],
+                        'url': cat['url'],
+                        'shard': cat['shard'] if 'shard' in cat else None,
+                        'query': cat['query'] if 'query' in cat else None,
+                        'landing': cat['landing'] if 'landing' in cat else None,
+                        'children_num': len(cat['childs']) if 'childs' in cat else 0,
+                    })
+                    if 'childs' in cat:
+                        parse_categories(cat['childs'])  # recursively parse subcategories
+
+                except Exception as ex:
+                    raise UnexpectedResponse(f'cannot parse category, json: {cat}') from ex
+
+        parse_categories(json_resp)
+
+        return fetch_started_at, categories
+
+    except Exception as e:
+        raise WildberriesWebsiteError(f'cannot fetch product categories: {e}') from e
