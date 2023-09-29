@@ -1,7 +1,16 @@
+"""
+Interface to Wildberries website
+"""
+
+import logging
 from decimal import Decimal
+from typing import Any
+from datetime import datetime, timezone
 
 # local imports
-from helpers import json_dumps, http_get
+from .helpers import json_dumps, http_get
+
+log = logging.getLogger(__name__)
 
 URL_WB_DETAILS = (
     'https://card.wb.ru/cards/detail?'
@@ -18,9 +27,9 @@ URL_WB_CATEGORIES = 'https://static-basket-01.wb.ru/vol0/data/main-menu-ru-ru-v2
 URL_WB_FILTERS = (
     'https://catalog.wb.ru/catalog/children_shoes/v4/filters?'
     'appType=1&curr=rub&dest=-1257786&regions=80,38,83,4,64,33,68,70,30,40,86,75,69,1,31,66,110,48,22,71,114'
-    '&{cat}'  # category subquery like "cat=8225" as specified in category details
+    '&{cat_filter}'  # category subfilter like "cat=8225" as specified in category details
 )
-"""Returns the available filters including a list of subcategories for a given category"""
+"""Returns the available filters including a list of subcategories for a given category subfilter"""
 
 
 class WildberriesWebsiteError(Exception):
@@ -39,63 +48,46 @@ class SeveralProductsFound(WildberriesWebsiteError):
     """Several products returned when one was expected"""
 
 
-class ProductDetails:
-    """Wildberries product details"""
-    def __init__(
-            self, article: str, name: str, price: Decimal, price_sale: Decimal,
-            discount_base: Decimal, discount_client: Decimal
-    ):
-        """
-        Fetch from some details about product by product article.
-        @param article: product article
-        @param name: product name
-        @param price: base product price
-        @param price_sale: discounted product price
-        @param discount_base: base discount
-        @param discount_client: SPP
-        """
-        self.article = article
-        self.name = name
-        self.price = price
-        self.price_sale = price_sale
-        self.discount_base = discount_base
-        self.discount_client = discount_client
-
-    def __str__(self):
-        return f'{self.article}: {self.name}, {self.price}, {self.price_sale}, spp: {self.discount_client}'
-
-
-def fetch_product_details(article: str) -> ProductDetails:
-    """Fetch some product details from wildberries.ru by article"""
+def fetch_product_details(article: str) -> tuple[datetime, dict[str, Any]]:
+    """
+    Fetch some product details from Wildberries website by article.
+    @param article: product article
+    @return: date/time the fetching started, dictionary of the product properties fetched from Wildberries
+    """
     try:
+        log.debug(f'fetch product details for article {article} from Wildberries website and parse response')
+        fetch_started_at = datetime.now(tz=timezone.utc)
         url = URL_WB_DETAILS.format(article=article)
         resp = http_get(url)
-        details = resp.json()
-        if 'data' not in details:
-            raise UnexpectedResponse(f'no "data" in json: {json_dumps(details)}')
-        if 'products' not in details['data']:
-            raise UnexpectedResponse(f'no "data->products" in json: {json_dumps(details)}')
-        products = details['data']['products']
-        if not products:
-            raise NoProductsFound(f'no products found, json: {json_dumps(details)}')
-        if len(products) > 1:
-            raise SeveralProductsFound(f'got several products: {json_dumps(details)}')
-        product = products[0]
-        if 'extended' not in product:
-            raise UnexpectedResponse(f'no "data->products[0]->extended" in json: {json_dumps(details)}')
+        json_resp = resp.json()
 
-        product_details = ProductDetails(
-            article=str(product['id']),
-            name=product['name'],
-            price=Decimal(str(int(product['priceU']) / 100.0)),
-            price_sale=Decimal(str(int(product['salePriceU']) / 100.0)),
-            discount_base=Decimal(str(int(product['extended']['basicSale']))),
-            discount_client=Decimal(str(int(product['extended']['clientSale']))),
+        # parse json response
+        if 'data' not in json_resp:
+            raise UnexpectedResponse(f'no "data" in json response: {json_dumps(json_resp)}')
+        if 'products' not in json_resp['data']:
+            raise UnexpectedResponse(f'no "data->products" in json response: {json_dumps(json_resp)}')
+        json_products = json_resp['data']['products']
+        if not json_products:
+            raise NoProductsFound(f'no products found, json response: {json_dumps(json_resp)}')
+        if len(json_products) > 1:
+            raise SeveralProductsFound(f'got several products, json response: {json_dumps(json_resp)}')
+        json_product = json_products[0]
+        if 'extended' not in json_product:
+            raise UnexpectedResponse(f'no "data->products[0]->extended" in json response: {json_dumps(json_resp)}')
+        article_from_wb = str(json_product['id'])
+        if article_from_wb != article:
+            raise UnexpectedResponse(f'got different article: {article_from_wb} != {article}')
+
+        return (
+            fetch_started_at,
+            {
+                'name': json_product['name'],
+                'price': Decimal(str(int(json_product['priceU']) / 100.0)),
+                'price_sale': Decimal(str(int(json_product['salePriceU']) / 100.0)),
+                'discount_base': Decimal(str(int(json_product['extended']['basicSale']))),
+                'discount_client': Decimal(str(int(json_product['extended']['clientSale']))),
+            }
         )
-        if product_details.article != article:
-            raise UnexpectedResponse(f'got different article: {product_details.article} != {article}')
-
-        return product_details
 
     except Exception as e:
         raise WildberriesWebsiteError(f'cannot fetch product details for article {article}: {e}') from e
