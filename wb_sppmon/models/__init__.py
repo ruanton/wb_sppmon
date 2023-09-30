@@ -1,52 +1,50 @@
-import logging
 import ZODB.Connection
-from persistent.mapping import PersistentMapping
+import persistent
+import persistent.mapping
 # noinspection PyUnresolvedReferences
 from BTrees.OOBTree import OOBTree
 # noinspection PyUnresolvedReferences
 from BTrees.IOBTree import IOBTree
 
 # local imports
-from .tcm import in_transaction
-
-log = logging.getLogger(__name__)
-
-
-class AppRootModel(PersistentMapping):
-    __parent__ = __name__ = None
+from . import wb
+from . import tcm
 
 
-# ZODB root object keys
-ZRK_APP_ROOT = 'app_root'
-ZRK_ARTICLE_TO_PRODUCT = 'article_to_product'
-ZRK_ID_TO_CATEGORY = 'id_to_category'
+class AppRoot(persistent.Persistent):
+    def __init__(self):
+        self._article_to_product = None
+        self._id_to_category = None
 
-# Callables to create new ZODB root objects
-ZODB_ROOT_OBJECT_MAKERS = {
-    ZRK_APP_ROOT: AppRootModel,
-    ZRK_ARTICLE_TO_PRODUCT: OOBTree,
-    ZRK_ID_TO_CATEGORY: IOBTree,
-}
+    @property
+    def article_to_product(self) -> dict[str, wb.Product]:
+        """Article to product OOBTree"""
+        if not hasattr(self, '_article_to_product') or self._article_to_product is None:
+            self._article_to_product = OOBTree()
+        return self._article_to_product
+
+    @property
+    def id_to_category(self) -> dict[int, wb.Category]:
+        """ID to product category OOBTree"""
+        if not hasattr(self, '_id_to_category') or self._id_to_category is None:
+            self._id_to_category = IOBTree()
+        return self._id_to_category
 
 
-def zodb_root_maker(conn: ZODB.Connection.Connection) -> PersistentMapping:
-    """Get ZODB root. Make new objects if any of the required ones do not exist yet.
+def get_app_root(conn: ZODB.Connection.Connection) -> AppRoot:
     """
-    zodb_root: PersistentMapping = conn.root()
-
-    if any(x not in zodb_root for x in ZODB_ROOT_OBJECT_MAKERS):
-        log.info('initialize database')
-        with in_transaction(conn):
-            for key, maker in ZODB_ROOT_OBJECT_MAKERS.items():
-                if key not in zodb_root:
-                    zodb_root[key] = maker()
-
-    return zodb_root
-
-
-def app_root_maker(conn: ZODB.Connection.Connection) -> AppRootModel:
-    """Get App Root object. Make new, if not exists yet.
+    Get the AppRoot persistent object. Creates a new one, if it does not already exist.
+    When created, starts and commits a transaction.
     """
-    zodb_root = zodb_root_maker(conn)
-    app_root: AppRootModel = zodb_root[ZRK_APP_ROOT]
+    zodb_root: persistent.mapping.PersistentMapping = conn.root()
+
+    if 'app_root' in zodb_root:
+        # get object from database
+        app_root: AppRoot = zodb_root['app_root']
+    else:
+        # create a new object
+        with tcm.in_transaction(conn):
+            app_root = AppRoot()
+            zodb_root['app_root'] = app_root
+
     return app_root

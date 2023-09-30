@@ -1,16 +1,16 @@
-from pyramid.config import Configurator
-from pyramid_zodbconn import get_connection
-from pyramid_tm import explicit_manager
+import pyramid.config
+import pyramid_zodbconn
+import pyramid_tm
 
 # local imports
-from .models import app_root_maker
+from . import models
 
 
 def root_factory(request):
     """ This function is called on every web request
     """
-    conn = get_connection(request)
-    return app_root_maker(conn)
+    conn = pyramid_zodbconn.get_connection(request)
+    return models.get_app_root(conn)
 
 
 def main(global_config, **settings):
@@ -20,9 +20,9 @@ def main(global_config, **settings):
 
     # force explicit transactions
     # see: https://docs.pylonsproject.org/projects/pyramid_tm/en/latest/index.html#custom-transaction-managers
-    settings['tm.manager_hook'] = explicit_manager
+    settings['tm.manager_hook'] = pyramid_tm.explicit_manager
 
-    with Configurator(settings=settings) as config:
+    with pyramid.config.Configurator(settings=settings) as config:
         config.include('pyramid_tm')
         config.include('pyramid_zodbconn')
         config.set_root_factory(root_factory)
