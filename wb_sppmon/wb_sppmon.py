@@ -8,9 +8,9 @@ from ZODB.Connection import Connection
 
 # local imports
 from .params import Params
-from .wildberries import fetch_product_details
-from .models import in_transaction, ZRK_ARTICLE_TO_PRODUCT
-from .models.wb import Product
+from .wildberries import UnexpectedResponse, fetch_product_details, fetch_categories
+from .models import in_transaction, ZRK_ARTICLE_TO_PRODUCT, ZRK_ID_TO_CATEGORY
+from .models.wb import Product, Category
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +53,48 @@ def fetch_product_updates(conn: Connection, articles: list[str]) -> tuple[list[P
     return updated_products, new_products_num, article_to_exception
 
 
+def update_product_categories(conn: Connection) -> tuple[int, int, int]:
+    """
+    Fetch all product categories from the Wildberries website.
+    Update database: creates new categories, updates existing, does not delete disappearing ones.
+    Raises exception on fetch or parse error.
+    @param conn: database connection
+    @return: (
+      • number of new categories,
+      • number of updated categories,
+      • number of category ID's disappeared from the Wildberries
+    )
+    """
+    fetch_started_at, product_categories_list = fetch_categories()
+
+    id_to_category: dict[int, Category] = conn.root()[ZRK_ID_TO_CATEGORY]  # persistent BTree: id => product category
+    new_cats_num, updated_cats_num, unchanged_cats_num = 0, 0, 0
+
+    for cat_props in product_categories_list:
+        # rename fields to conform persistent entity
+        cat_id = cat_props['id']; del cat_props['id']
+        cat_props['parent_id'] = cat_props['parent']; del cat_props['parent']
+
+        if cat_id in id_to_category:
+            # get entity from database
+            category = id_to_category[cat_id]
+            if category.fetched_at == fetch_started_at:
+                # we have already seen this ID in the response
+                raise UnexpectedResponse(f'several categories with the same ID: {category.name}, {cat_props["name"]}')
+            if category.update(fetch_started_at, **cat_props):
+                updated_cats_num += 1
+            else:
+                unchanged_cats_num += 1
+
+        else:
+            # create new entity
+            category = Category(id_=cat_id, **cat_props, fetched_at=fetch_started_at)
+            id_to_category[cat_id] = category
+            new_cats_num += 1
+
+    return new_cats_num, updated_cats_num, len(id_to_category) - new_cats_num - updated_cats_num - unchanged_cats_num
+
+
 def main():
     parser = argparse.ArgumentParser(description='Wildberries SPP Monitor.')
     parser.add_argument('config_uri', help='The URI to the main configuration file.')
@@ -75,6 +117,12 @@ def main():
         log.info('try to fetch product updates for all articles from input params')
         with in_transaction(conn):
             products, new_products_num, exceptions = fetch_product_updates(conn, params.product_articles)
+
+        log.info('fetch, parse and save to database all product categories')
+        with in_transaction(conn):
+            new_cats_num, updated_cats_num, disappeared_cats_num = update_product_categories(conn)
+
+        print(f'=== Categories added: {new_cats_num}, updated: {updated_cats_num}, disappeared: {disappeared_cats_num}')
 
         print(f'=== Inputs:\n{params}\n')
         if new_products_num:

@@ -56,3 +56,23 @@ class Product(FetchedEntity):
 
     def __str__(self):
         return f'{self.article}: {self.name}, {self.price}, sale: {self.price_sale}, spp: {self.discount_client}'
+
+
+class Category(FetchedEntity):
+    """Wildberries product category"""
+    def __init__(
+            self, id_: int, name: str, url: str, children_num: int, fetched_at: datetime,
+            parent_id: int = None, shard: str = None, query: str = None, landing: bool = None
+    ):
+        super().__init__(fetched_at)
+        self.id = id_;                     """Category ID"""
+        self.name = name;                  """Name of the category"""
+        self.url = url;                    """URL of the category"""
+        self.children_num = children_num;  """Number of children categories as got in json from Wildberries"""
+        self.parent_id = parent_id;        """Parent category ID"""
+        self.shard = shard;                """Don't know what's this"""
+        self.query = query;                """Query subfilter"""
+        self.landing = landing;            """Don't know what's this"""
+
+    def __str__(self):
+        return f'{self.cat_id}: {self.name}'
