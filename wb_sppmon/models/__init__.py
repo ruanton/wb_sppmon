@@ -16,6 +16,7 @@ class AppRoot(persistent.Persistent):
     def __init__(self):
         self._article_to_product = None
         self._id_to_category = None
+        self._name_to_category = None
 
     @property
     def article_to_product(self) -> dict[str, wb.Product]:
@@ -26,10 +27,17 @@ class AppRoot(persistent.Persistent):
 
     @property
     def id_to_category(self) -> dict[int, wb.Category]:
-        """ID to product category OOBTree"""
+        """ID to product category IOBTree"""
         if not hasattr(self, '_id_to_category') or self._id_to_category is None:
             self._id_to_category = IOBTree()
         return self._id_to_category
+
+    @property
+    def name_to_category(self) -> dict[str, wb.Category | set[wb.Category]]:
+        """Category name to object OOBTree"""
+        if not hasattr(self, '_name_to_category') or self._name_to_category is None:
+            self._name_to_category = OOBTree()
+        return self._name_to_category
 
 
 def get_app_root(conn: ZODB.Connection.Connection) -> AppRoot:
