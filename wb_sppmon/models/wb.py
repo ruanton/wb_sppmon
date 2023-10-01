@@ -18,13 +18,13 @@ class FetchedEntity(Persistent):
 
     @property
     def old_values(self) -> dict | None:
-        """Previous values of changed fields; for new entity or entity loaded from database returns None"""
+        """Previous values of changed fields; for new entity or entity loaded from the database, None is returned"""
         return self._v_old_values if hasattr(self, '_v_old_values') else None
 
     def update(self, fetched_at: datetime, **kwargs) -> bool:
         """
         Update entity properties to newly fetched values. Saves previous values to _v_old_values.
-        Updates fetched_at if any of the given fields have new value.
+        If any of the given fields have new value, fetched_at is updated.
         If no fields changed, does not update entity and does not change fetched_at,
         but creates empty dictionary _v_old_values.
 
@@ -75,4 +75,4 @@ class Category(FetchedEntity):
         self.landing = landing;            """Don't know what's this"""
 
     def __str__(self):
-        return f'{self.cat_id}: {self.name}'
+        return f'{self.id}: {self.name}'

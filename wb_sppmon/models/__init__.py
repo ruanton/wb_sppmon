@@ -12,6 +12,7 @@ from . import tcm
 
 
 class AppRoot(persistent.Persistent):
+    """App Root object. Root of all other persistent objects."""
     def __init__(self):
         self._article_to_product = None
         self._id_to_category = None
@@ -34,7 +35,7 @@ class AppRoot(persistent.Persistent):
 def get_app_root(conn: ZODB.Connection.Connection) -> AppRoot:
     """
     Get the AppRoot persistent object. Creates a new one, if it does not already exist.
-    When created, starts and commits a transaction.
+    Side effect: if the object does not already exist in the database, starts and commits a transaction to create it.
     """
     zodb_root: persistent.mapping.PersistentMapping = conn.root()
 

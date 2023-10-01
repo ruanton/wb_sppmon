@@ -3,12 +3,12 @@ Interface to Wildberries website
 """
 
 import logging
+import typing
 from decimal import Decimal
-from typing import Any
 from datetime import datetime, timezone
 
 # local imports
-from .helpers import json_dumps, http_get
+from . import helpers
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ class SeveralProductsFound(WildberriesWebsiteError):
     """Several products returned when one was expected"""
 
 
-def fetch_product_details(article: str) -> tuple[datetime, dict[str, Any]]:
+def fetch_product_details(article: str) -> tuple[datetime, dict[str, typing.Any]]:
     """
     Fetch some product details from the Wildberries website by article.
     @param article: product article
@@ -58,25 +58,26 @@ def fetch_product_details(article: str) -> tuple[datetime, dict[str, Any]]:
         log.debug(f'fetch product details for article {article} from Wildberries website and parse response')
         fetch_started_at = datetime.now(tz=timezone.utc)
         url = URL_WB_DETAILS.format(article=article)
-        resp = http_get(url)
+        resp = helpers.http_get(url)
         json_resp = resp.json()
+        json_resp_repr = f'json response:\n{helpers.json_dumps(json_resp)}'
 
         # parse json response
         if 'data' not in json_resp:
-            raise UnexpectedResponse(f'no "data" in json response: {json_dumps(json_resp)}')
+            raise UnexpectedResponse(f'no "data" in {json_resp_repr}')
         if 'products' not in json_resp['data']:
-            raise UnexpectedResponse(f'no "data->products" in json response: {json_dumps(json_resp)}')
+            raise UnexpectedResponse(f'no "data->products" in {json_resp_repr}')
         json_products = json_resp['data']['products']
         if not json_products:
-            raise NoProductsFound(f'no products found, json response: {json_dumps(json_resp)}')
+            raise NoProductsFound(f'no products found, {json_resp_repr}')
         if len(json_products) > 1:
-            raise SeveralProductsFound(f'got several products, json response: {json_dumps(json_resp)}')
+            raise SeveralProductsFound(f'got several products, {json_resp_repr}')
         json_product = json_products[0]
         if 'extended' not in json_product:
-            raise UnexpectedResponse(f'no "data->products[0]->extended" in json response: {json_dumps(json_resp)}')
+            raise UnexpectedResponse(f'no "data->products[0]->extended" in {json_resp_repr}')
         article_from_wb = str(json_product['id'])
         if article_from_wb != article:
-            raise UnexpectedResponse(f'got different article: {article_from_wb} != {article}')
+            raise UnexpectedResponse(f'got different article: {article_from_wb} != {article}, {json_resp_repr}')
 
         return (
             fetch_started_at,
@@ -102,7 +103,7 @@ def fetch_categories() -> tuple[datetime, list[dict[str, int | str | bool]]]:
     try:
         log.debug(f'fetch product categories from the Wildberries website and parse response')
         fetch_started_at = datetime.now(tz=timezone.utc)
-        resp = http_get(URL_WB_CATEGORIES)
+        resp = helpers.http_get(URL_WB_CATEGORIES)
         json_resp = resp.json()
 
         # parse json response

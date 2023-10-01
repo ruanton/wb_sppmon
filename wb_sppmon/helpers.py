@@ -7,7 +7,7 @@ import time
 import random
 import requests
 import simplejson
-from urllib3.exceptions import HTTPError
+import urllib3.exceptions
 
 
 def _json_serial(obj):
@@ -27,11 +27,11 @@ def http_get(url: str, retries: int = 5, random_retry_pause: float = 0.5, **kwar
         try:
             resp = requests.get(url, **kwargs)
             if resp.status_code != 200:
-                raise HTTPError(f'status_code={resp.status_code}, reason: {resp.reason}')
+                raise urllib3.exceptions.HTTPError(f'status_code={resp.status_code}, reason: {resp.reason}')
 
             return resp
 
-        except (HTTPError, IOError, TimeoutError, ConnectionResetError):
+        except (urllib3.exceptions.HTTPError, IOError, TimeoutError, ConnectionResetError):
             # also catches all inherited types, including:
             # - ConnectionError is RequestException is IOError
             # - MaxRetryError is RequestError is PoolError is HTTPError
@@ -59,7 +59,7 @@ def update_object(obj: object, **kwargs) -> dict:
     """
     unknown_attributes = [x for x in kwargs if not hasattr(obj, x)]
     if unknown_attributes:
-        raise ValueError(f'object {obj.__class__} does not have attributes: {", ".join(unknown_attributes)}')
+        raise ValueError(f'object of {obj.__class__} does not have attributes: {", ".join(unknown_attributes)}')
 
     changed_attributes = [x for x in kwargs if getattr(obj, x) != kwargs[x]]
     if not changed_attributes:
