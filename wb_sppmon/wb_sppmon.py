@@ -8,9 +8,9 @@ from pyramid_zodbconn import get_connection
 # local imports
 from .params import Params
 from .wildberries import UnexpectedResponse, fetch_product_details, fetch_categories
-from .models import AppRoot, get_app_root, CategoriesLastUpdate
+from .models import AppRoot, get_app_root
 from .models.tcm import in_transaction
-from .models.wb import Product, Category
+from .models.wb import LastUpdateResult, Product, Category
 
 log = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ def update_product_categories(app_root: AppRoot) -> None:
         if name not in app_root.name_to_category or app_root.name_to_category[name] != cat:
             app_root.name_to_category[name] = cat
 
-    app_root.categories_last_update = CategoriesLastUpdate(
+    app_root.categories_last_update = LastUpdateResult(
         fetched_at=fetch_started_at,
         num_new=new_cats_num,
         num_updated=updated_cats_num,

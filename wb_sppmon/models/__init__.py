@@ -1,4 +1,3 @@
-import datetime
 import ZODB.Connection
 import persistent
 import persistent.mapping
@@ -10,15 +9,6 @@ from BTrees.IOBTree import IOBTree
 # local imports
 from . import wb
 from . import tcm
-
-
-class CategoriesLastUpdate:
-    """Results of product categories last successful update"""
-    def __init__(self, fetched_at: datetime.datetime, num_new: int, num_updated: int, num_gone: int):
-        self.fetched_at = fetched_at;    """Date/time the fetching started"""
-        self.num_new = num_new;          """Number of new categories"""
-        self.num_updated = num_updated;  """Number of updated categories"""
-        self.num_gone = num_gone;        """Number of disappeared categories"""
 
 
 class AppRoot(persistent.Persistent):
@@ -52,12 +42,12 @@ class AppRoot(persistent.Persistent):
         return self._name_to_category
 
     @property
-    def categories_last_update(self) -> CategoriesLastUpdate | None:
+    def categories_last_update(self) -> wb.LastUpdateResult | None:
         """Results of categories last update"""
         return self._categories_last_update if hasattr(self, '_categories_last_update') else None
 
     @categories_last_update.setter
-    def categories_last_update(self, value: CategoriesLastUpdate):
+    def categories_last_update(self, value: wb.LastUpdateResult):
         self._categories_last_update = value
 
 

@@ -10,6 +10,15 @@ from persistent import Persistent
 from wb_sppmon.helpers import update_object
 
 
+class LastUpdateResult:
+    """Results of the last successful entity set update"""
+    def __init__(self, fetched_at: datetime, num_new: int, num_updated: int, num_gone: int):
+        self.fetched_at = fetched_at;    """Date/time the fetching started"""
+        self.num_new = num_new;          """Number of new entities"""
+        self.num_updated = num_updated;  """Number of updated entities"""
+        self.num_gone = num_gone;        """Number of disappeared entities"""
+
+
 class FetchedEntity(Persistent):
     """Entity fetched from Wildberries"""
     def __init__(self, fetched_at: datetime):
@@ -70,7 +79,7 @@ class Category(FetchedEntity):
         self.url = url;                    """URL of the category"""
         self.children_num = children_num;  """Number of children categories as got in json from Wildberries"""
         self.parent_id = parent_id;        """Parent category ID"""
-        self.shard = shard;                """Don't know what's this"""
+        self.shard = shard;                """Part of URL"""
         self.query = query;                """Query subfilter"""
         self.landing = landing;            """Don't know what's this"""
 
