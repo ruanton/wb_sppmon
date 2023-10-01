@@ -18,6 +18,7 @@ class AppRoot(persistent.Persistent):
         self._article_to_product = None
         self._id_to_category = None
         self._name_to_category = None
+        self._seo_to_category = None
         self._categories_last_update = None
 
     @property
@@ -40,6 +41,13 @@ class AppRoot(persistent.Persistent):
         if not hasattr(self, '_name_to_category') or self._name_to_category is None:
             self._name_to_category = OOBTree()
         return self._name_to_category
+
+    @property
+    def seo_to_category(self) -> dict[str, wb.Category | set[wb.Category]]:
+        """Category seo to object OOBTree"""
+        if not hasattr(self, '_seo_to_category') or self._seo_to_category is None:
+            self._seo_to_category = OOBTree()
+        return self._seo_to_category
 
     @property
     def categories_last_update(self) -> wb.LastUpdateResult | None:

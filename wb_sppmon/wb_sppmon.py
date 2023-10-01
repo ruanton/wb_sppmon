@@ -56,13 +56,13 @@ def update_product_categories(app_root: AppRoot) -> None:
     """
     Fetch all product categories from the Wildberries website.
     Updates database: creates new categories, updates existing, does not delete disappearing ones.
-    Updates name_to_category mapping.
+    Updates name_to_category and seo_to_category mappings.
     Raises exception on fetch or parse error.
     @param app_root: App Root persistent object
     """
     fetch_started_at, product_categories_list = fetch_categories()
 
-    new_cats_num, updated_cats_num, unchanged_cats_num, name_to_cat = 0, 0, 0, {}
+    new_cats_num, updated_cats_num, unchanged_cats_num, name_to_cat, seo_to_cat = 0, 0, 0, {}, {}
     for cat_props in product_categories_list:
         # rename fields to conform persistent entity
         cat_id = cat_props['id']; del cat_props['id']
@@ -95,10 +95,26 @@ def update_product_categories(app_root: AppRoot) -> None:
         else:
             name_to_cat[category.name] = category  # set mapping to single entity
 
-    # update persistent mapping if required, do not delete old names
+        # add the category to seo_to_category dict
+        if category.seo:
+            if category.seo in seo_to_cat:
+                # a category or a set of categories with this seo already exist in mapping
+                if isinstance(seo_to_cat[category.seo], Category):
+                    seo_to_cat[category.seo] = {seo_to_cat[category.seo], category}  # convert to a set
+                else:
+                    seo_to_cat[category.seo].add(category)  # add to the set
+            else:
+                seo_to_cat[category.seo] = category  # set mapping to single entity
+
+    # update app_root.name_to_category persistent mapping if required, do not delete old names
     for name, cat in name_to_cat.items():
         if name not in app_root.name_to_category or app_root.name_to_category[name] != cat:
             app_root.name_to_category[name] = cat
+
+    # update app_root.seo_to_category persistent mapping if required, do not delete old seos
+    for seo, cat in seo_to_cat.items():
+        if seo not in app_root.seo_to_category or app_root.seo_to_category[seo] != cat:
+            app_root.seo_to_category[seo] = cat
 
     app_root.categories_last_update = LastUpdateResult(
         fetched_at=fetch_started_at,

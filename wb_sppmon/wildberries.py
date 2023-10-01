@@ -123,6 +123,7 @@ def fetch_categories() -> tuple[datetime, list[dict[str, int | str | bool]]]:
                         'id': cat['id'],
                         'parent': cat['parent'] if 'parent' in cat else None,
                         'name': cat['name'],
+                        'seo': cat['seo'] if 'seo' in cat else None,
                         'url': cat['url'],
                         'shard': cat['shard'] if 'shard' in cat else None,
                         'query': cat['query'] if 'query' in cat else None,
