@@ -25,11 +25,14 @@ URL_WB_CATEGORIES = 'https://static-basket-01.wb.ru/vol0/data/main-menu-ru-ru-v2
 
 
 URL_WB_FILTERS = (
-    'https://catalog.wb.ru/catalog/children_shoes/v4/filters?'
+    'https://catalog.wb.ru/catalog/{shard}/v4/filters?'  # category shard as got from Wildberries
     'appType=1&curr=rub&dest=-1257786&regions=80,38,83,4,64,33,68,70,30,40,86,75,69,1,31,66,110,48,22,71,114'
     '&{cat_filter}'  # category subfilter like "cat=8225" as specified in category details
 )
 """Returns the available filters including a list of subcategories for a given category subfilter"""
+
+SUBCATEGORY_FILTER_NAME = 'Категория';  """Name of filtering by subcategory"""
+SUBCATEGORY_FILTER_KEY = 'xsubject';    """Key for URL query for this filtering"""
 
 
 class WildberriesWebsiteError(Exception):
@@ -59,6 +62,8 @@ def fetch_product_details(article: str) -> tuple[datetime, dict[str, typing.Any]
         fetch_started_at = datetime.now(tz=timezone.utc)
         url = URL_WB_DETAILS.format(article=article)
         resp = helpers.http_get(url)
+        if not resp.content:
+            raise UnexpectedResponse('no content')
         json_resp = resp.json()
         json_resp_repr = f'json response:\n{helpers.json_dumps(json_resp)}'
 
@@ -104,6 +109,8 @@ def fetch_categories() -> tuple[datetime, list[dict[str, int | str | bool]]]:
         log.debug(f'fetch product categories from the Wildberries website and parse response')
         fetch_started_at = datetime.now(tz=timezone.utc)
         resp = helpers.http_get(URL_WB_CATEGORIES)
+        if not resp.content:
+            raise UnexpectedResponse('no content')
         json_resp = resp.json()
 
         # parse json response
@@ -134,3 +141,52 @@ def fetch_categories() -> tuple[datetime, list[dict[str, int | str | bool]]]:
 
     except Exception as e:
         raise WildberriesWebsiteError(f'cannot fetch product categories: {e}') from e
+
+
+def fetch_subcategories(shard: str, cat_filter: str) -> tuple[datetime, list[dict[str, int | str]]]:
+    """
+    Fetch and parse all product subcategories for a given category subfilter.
+    @param shard: part of an HTTP-url
+    @param cat_filter: part of an HTTP-query string like 'cat=1234'
+    @return: date/time the fetching started, list of product subcategories
+    """
+    try:
+        log.debug(f'fetch subcategories from the Wildberries website for shard: {shard}, subfilter: {cat_filter}')
+        fetch_started_at = datetime.now(tz=timezone.utc)
+        url = URL_WB_FILTERS.format(shard=shard, cat_filter=cat_filter)
+        resp = helpers.http_get(url)
+        if not resp.content:
+            raise UnexpectedResponse('no content')
+        json_resp = resp.json()
+        json_resp_repr = f'json response:\n{helpers.json_dumps(json_resp)}'
+
+        # parse json response
+        req_name, req_key = SUBCATEGORY_FILTER_NAME, SUBCATEGORY_FILTER_KEY
+        if 'data' not in json_resp:
+            raise UnexpectedResponse(f'no "data" in {json_resp_repr}')
+        if 'filters' not in json_resp['data']:
+            raise UnexpectedResponse(f'no "data->filters" in {json_resp_repr}')
+        json_filters = json_resp['data']['filters']
+        json_filters_selected = [x for x in json_filters if x['name'] == req_name or x['key'] == req_key]
+        if not json_filters_selected:
+            raise UnexpectedResponse(f'filter with the name "{req_name}" was not found in {json_resp_repr}')
+        if not json_filters_selected:
+            raise UnexpectedResponse(f'several filters with the name "{req_name}" were found in {json_resp_repr}')
+        json_filter = json_filters_selected[0]
+        if json_filter['name'] != req_name or json_filter['key'] != req_key:
+            raise UnexpectedResponse(f'unexpected filter "{req_name}" returned, {json_resp_repr}')
+        if 'items' not in json_filter:
+            raise UnexpectedResponse(f'no "items" in "{req_name}" filter, {json_resp_repr}')
+
+        # parse json response
+        subcategories: list[dict[str, int | str]] = []
+        for scat in json_filter['items']:
+            subcategories.append({
+                'id': scat['id'],
+                'name': scat['name'],
+            })
+
+        return fetch_started_at, subcategories
+
+    except Exception as e:
+        raise WildberriesWebsiteError(f'cannot fetch product subcategories for cat filter {cat_filter}: {e}') from e
