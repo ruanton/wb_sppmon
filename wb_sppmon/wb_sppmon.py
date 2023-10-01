@@ -7,10 +7,10 @@ from pyramid_zodbconn import get_connection
 
 # local imports
 from .params import Params
-from .wildberries import UnexpectedResponse, fetch_product_details, fetch_categories
+from .wildberries import UnexpectedResponse, fetch_product_details, fetch_categories, fetch_subcategories
 from .models import AppRoot, get_app_root
 from .models.tcm import in_transaction
-from .models.wb import LastUpdateResult, Product, Category
+from .models.wb import LastUpdateResult, Product, Category, Subcategory
 
 log = logging.getLogger(__name__)
 
@@ -108,6 +108,69 @@ def update_product_categories(app_root: AppRoot) -> None:
     )
 
 
+def update_subcategories(category: Category):
+    """
+    Fetch all subcategories for the given product category.
+    Updates category entity: creates new subcategories, updates existing, but does not delete disappearing ones.
+    Updates name_to_subcategory mapping.
+    Raises exception on fetch or parse error.
+    @param category: Product category entity to update its subcategories
+    """
+    if not category.shard or not category.query:
+        raise ValueError(f'category {category} must have "shard" and "query" properties to fetch subcategories')
+
+    fetch_started_at, subcategories_list = fetch_subcategories(category.shard, cat_filter=category.query)
+
+    new_scats_num, updated_scats_num, unchanged_scats_num, name_to_scat = 0, 0, 0, {}
+    for scat_props in subcategories_list:
+        scat_id = scat_props['id']; del scat_props['id']  # delete "id" field to conform persistent entity
+        scat_name = scat_props['name']
+
+        if scat_id in category.id_to_subcategory:
+            # get existing entity from database
+            subcategory = category.id_to_subcategory[scat_id]
+            if subcategory.fetched_at == fetch_started_at:
+                # we have already seen this ID in the response
+                raise UnexpectedResponse(f'several subcategories with ID {scat_id}: {subcategory.name}, {scat_name}')
+
+            if subcategory.update(fetch_started_at, **scat_props):
+                updated_scats_num += 1
+            else:
+                unchanged_scats_num += 1
+
+        else:
+            # create new entity
+            subcategory = Subcategory(id_=scat_id, **scat_props, fetched_at=fetch_started_at, category=category)
+            category.id_to_subcategory[scat_id] = subcategory
+            new_scats_num += 1
+
+        # get existing subcategory with this name if any
+        ex_scat = category.name_to_subcategory[scat_name] if scat_name in category.name_to_subcategory else None
+
+        # verify we got no duplicates
+        if ex_scat and ex_scat.fetched_at == fetch_started_at and ex_scat != subcategory:
+            # we have already seen this name in the response
+            raise UnexpectedResponse(f'several sub cats with name {scat_name}: {scat_id}, {ex_scat.id}')
+
+        # if no existing subcategory, or it differs, update name_to_subcategory dict
+        if ex_scat != subcategory:
+            category.name_to_subcategory[scat_name] = subcategory
+
+        # verify consistency
+        if subcategory.category != category:
+            raise RuntimeError(f'subcategory.category != category: {subcategory.category} != {category}')
+
+    # of for scat_props in subcategories_list
+
+    # save results of the update
+    category.subcategories_last_update = LastUpdateResult(
+        fetched_at=fetch_started_at,
+        num_new=new_scats_num,
+        num_updated=updated_scats_num,
+        num_gone=len(category.id_to_subcategory) - new_scats_num - updated_scats_num - unchanged_scats_num
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description='Wildberries SPP Monitor.')
     parser.add_argument('config_uri', help='The URI to the main configuration file.')
@@ -148,6 +211,21 @@ def main():
 
         lur = app_root.categories_last_update
         print(f'=== Categories added: {lur.num_new}, updated: {lur.num_updated}, disappeared: {lur.num_gone}')
+
+        log.info('update subcategories for all product categories')
+        for cat in app_root.id_to_category.values():
+            if not cat.query or not cat.shard:
+                continue
+            if cat.subcategories_last_update:
+                continue
+            print(f'trying to update subcategories for {cat}')
+            try:
+                with in_transaction(conn):
+                    update_subcategories(cat)
+                lur = cat.subcategories_last_update
+                print(f'=== Scats added: {lur.num_new}, updated: {lur.num_updated}, disappeared: {lur.num_gone}')
+            except Exception as e:
+                log.warning(f'error: {e}')
 
 
 if __name__ == '__main__':

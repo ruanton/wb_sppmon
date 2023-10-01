@@ -5,6 +5,10 @@ Persistent models of Wildberries entities
 from decimal import Decimal
 from datetime import datetime
 from persistent import Persistent
+# noinspection PyUnresolvedReferences
+from BTrees.OOBTree import OOBTree
+# noinspection PyUnresolvedReferences
+from BTrees.IOBTree import IOBTree
 
 # module imports
 from wb_sppmon.helpers import update_object
@@ -67,6 +71,18 @@ class Product(FetchedEntity):
         return f'{self.article}: {self.name}, {self.price}, sale: {self.price_sale}, spp: {self.discount_client}'
 
 
+class Subcategory(FetchedEntity):
+    """Wildberries product subcategory"""
+    def __init__(self, id_: int, name: str, fetched_at: datetime, category: 'Category'):
+        super().__init__(fetched_at)
+        self.id = id_;                     """Subcategory ID"""
+        self.name = name;                  """Name of the subcategory"""
+        self.category = category;          """The category this subcategory belongs to"""
+
+    def __str__(self):
+        return f'{self.id}: {self.name}'
+
+
 class Category(FetchedEntity):
     """Wildberries product category"""
     def __init__(
@@ -74,14 +90,40 @@ class Category(FetchedEntity):
             parent_id: int = None, shard: str = None, query: str = None, landing: bool = None
     ):
         super().__init__(fetched_at)
-        self.id = id_;                     """Category ID"""
-        self.name = name;                  """Name of the category"""
-        self.url = url;                    """URL of the category"""
-        self.children_num = children_num;  """Number of children categories as got in json from Wildberries"""
-        self.parent_id = parent_id;        """Parent category ID"""
-        self.shard = shard;                """Part of URL"""
-        self.query = query;                """Query subfilter"""
-        self.landing = landing;            """Don't know what's this"""
+        self.id = id_;                         """Category ID"""
+        self.name = name;                      """Name of the category"""
+        self.url = url;                        """URL of the category"""
+        self.children_num = children_num;      """Number of children categories as got in json from Wildberries"""
+        self.parent_id = parent_id;            """Parent category ID"""
+        self.shard = shard;                    """Part of URL"""
+        self.query = query;                    """Query subfilter"""
+        self.landing = landing;                """Don't know what's this"""
+        self._id_to_subcategory = None
+        self._name_to_subcategory = None
+        self._subcategories_last_update = None
 
     def __str__(self):
         return f'{self.id}: {self.name}'
+
+    @property
+    def id_to_subcategory(self) -> dict[int, Subcategory]:
+        """ID to subcategory IOBTree"""
+        if not hasattr(self, '_id_to_subcategory') or self._id_to_subcategory is None:
+            self._id_to_subcategory = IOBTree()
+        return self._id_to_subcategory
+
+    @property
+    def name_to_subcategory(self) -> dict[str, Subcategory]:
+        """Subcategory name to object OOBTree"""
+        if not hasattr(self, '_name_to_subcategory') or self._name_to_subcategory is None:
+            self._name_to_subcategory = OOBTree()
+        return self._name_to_subcategory
+
+    @property
+    def subcategories_last_update(self) -> LastUpdateResult | None:
+        """Results of subcategories last update"""
+        return self._subcategories_last_update if hasattr(self, '_subcategories_last_update') else None
+
+    @subcategories_last_update.setter
+    def subcategories_last_update(self, value: LastUpdateResult):
+        self._subcategories_last_update = value
