@@ -8,7 +8,7 @@ from pyramid_zodbconn import get_connection
 # local imports
 from .params import Params
 from .wildberries import UnexpectedResponse, fetch_product_details, fetch_categories
-from .models import AppRoot, get_app_root
+from .models import AppRoot, get_app_root, CategoriesLastUpdate
 from .models.tcm import in_transaction
 from .models.wb import Product, Category
 
@@ -52,18 +52,13 @@ def fetch_product_updates(app_root: AppRoot, articles: list[str]) -> tuple[list[
     return updated_products, new_products_num, article_to_exception
 
 
-def update_product_categories(app_root: AppRoot) -> tuple[int, int, int]:
+def update_product_categories(app_root: AppRoot) -> None:
     """
     Fetch all product categories from the Wildberries website.
     Updates database: creates new categories, updates existing, does not delete disappearing ones.
     Updates name_to_category mapping.
     Raises exception on fetch or parse error.
     @param app_root: App Root persistent object
-    @return: (
-      • number of new categories,
-      • number of updated categories,
-      • number of category ID's disappeared from the Wildberries
-    )
     """
     fetch_started_at, product_categories_list = fetch_categories()
 
@@ -105,8 +100,12 @@ def update_product_categories(app_root: AppRoot) -> tuple[int, int, int]:
         if name not in app_root.name_to_category or app_root.name_to_category[name] != cat:
             app_root.name_to_category[name] = cat
 
-    disappeared_cats_num = len(app_root.id_to_category) - new_cats_num - updated_cats_num - unchanged_cats_num
-    return new_cats_num, updated_cats_num, disappeared_cats_num
+    app_root.categories_last_update = CategoriesLastUpdate(
+        fetched_at=fetch_started_at,
+        num_new=new_cats_num,
+        num_updated=updated_cats_num,
+        num_gone=len(app_root.id_to_category) - new_cats_num - updated_cats_num - unchanged_cats_num
+    )
 
 
 def main():
@@ -145,9 +144,10 @@ def main():
 
         log.info('fetch, parse and save to database all product categories')
         with in_transaction(conn):
-            new_cats_num, updated_cats_num, disappeared_cats_num = update_product_categories(app_root)
+            update_product_categories(app_root)
 
-        print(f'=== Categories added: {new_cats_num}, updated: {updated_cats_num}, disappeared: {disappeared_cats_num}')
+        lur = app_root.categories_last_update
+        print(f'=== Categories added: {lur.num_new}, updated: {lur.num_updated}, disappeared: {lur.num_gone}')
 
 
 if __name__ == '__main__':
