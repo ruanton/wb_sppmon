@@ -3,7 +3,6 @@ Interface to Wildberries website
 """
 
 import logging
-import typing
 from decimal import Decimal
 from datetime import datetime, timezone
 
@@ -51,7 +50,7 @@ class SeveralProductsFound(WildberriesWebsiteError):
     """Several products returned when one was expected"""
 
 
-def fetch_product_details(article: str) -> tuple[datetime, dict[str, typing.Any]]:
+def fetch_product_details(article: str) -> tuple[datetime, dict[str, str | Decimal]]:
     """
     Fetch some product details from the Wildberries website by article.
     @param article: product article

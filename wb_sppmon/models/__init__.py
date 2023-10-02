@@ -17,37 +17,38 @@ class AppRoot(persistent.Persistent):
     def __init__(self):
         self._article_to_product = None
         self._id_to_category = None
-        self._name_to_category = None
-        self._seo_to_category = None
+        self._lw_name_to_category = None
+        self._lw_seo_to_category = None
         self._categories_last_update = None
+        self._lw_name_to_subcategory = None
 
     @property
     def article_to_product(self) -> dict[str, wb.Product]:
-        """Article to product OOBTree"""
+        """OOBTree: product article => product entity"""
         if not hasattr(self, '_article_to_product') or self._article_to_product is None:
             self._article_to_product = OOBTree()
         return self._article_to_product
 
     @property
     def id_to_category(self) -> dict[int, wb.Category]:
-        """ID to product category IOBTree"""
+        """IOBTree: product category ID => category entity"""
         if not hasattr(self, '_id_to_category') or self._id_to_category is None:
             self._id_to_category = IOBTree()
         return self._id_to_category
 
     @property
-    def name_to_category(self) -> dict[str, wb.Category | set[wb.Category]]:
-        """Category name to object OOBTree"""
-        if not hasattr(self, '_name_to_category') or self._name_to_category is None:
-            self._name_to_category = OOBTree()
-        return self._name_to_category
+    def lw_name_to_category(self) -> dict[str, wb.Category | set[wb.Category]]:
+        """OOBTree: category lowered name => category or a set of categories"""
+        if not hasattr(self, '_lw_name_to_category') or self._lw_name_to_category is None:
+            self._lw_name_to_category = OOBTree()
+        return self._lw_name_to_category
 
     @property
-    def seo_to_category(self) -> dict[str, wb.Category | set[wb.Category]]:
-        """Category seo to object OOBTree"""
-        if not hasattr(self, '_seo_to_category') or self._seo_to_category is None:
-            self._seo_to_category = OOBTree()
-        return self._seo_to_category
+    def lw_seo_to_category(self) -> dict[str, wb.Category | set[wb.Category]]:
+        """OOBTree: category lowered seo => category or a set of categories"""
+        if not hasattr(self, '_lw_seo_to_category') or self._lw_seo_to_category is None:
+            self._lw_seo_to_category = OOBTree()
+        return self._lw_seo_to_category
 
     @property
     def categories_last_update(self) -> wb.LastUpdateResult | None:
@@ -57,6 +58,13 @@ class AppRoot(persistent.Persistent):
     @categories_last_update.setter
     def categories_last_update(self, value: wb.LastUpdateResult):
         self._categories_last_update = value
+
+    @property
+    def lw_name_to_subcategory(self) -> dict[str, wb.Subcategory | set[wb.Subcategory]]:
+        """OOBTree: subcategory lowered name => subcategory or a set of subcategories"""
+        if not hasattr(self, '_lw_name_to_subcategory') or self._lw_name_to_subcategory is None:
+            self._lw_name_to_subcategory = OOBTree()
+        return self._lw_name_to_subcategory
 
 
 def get_app_root(conn: ZODB.Connection.Connection) -> AppRoot:

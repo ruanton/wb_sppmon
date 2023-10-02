@@ -100,7 +100,7 @@ class Category(FetchedEntity):
         self.query = query;                    """Query subfilter"""
         self.landing = landing;                """Don't know what's this"""
         self._id_to_subcategory = None
-        self._name_to_subcategory = None
+        self._lw_name_to_subcategory = None
         self._subcategories_last_update = None
 
     def __str__(self):
@@ -108,17 +108,17 @@ class Category(FetchedEntity):
 
     @property
     def id_to_subcategory(self) -> dict[int, Subcategory]:
-        """ID to subcategory IOBTree"""
+        """IOBTree: subcategory ID => subcategory entity"""
         if not hasattr(self, '_id_to_subcategory') or self._id_to_subcategory is None:
             self._id_to_subcategory = IOBTree()
         return self._id_to_subcategory
 
     @property
-    def name_to_subcategory(self) -> dict[str, Subcategory]:
-        """Subcategory name to object OOBTree"""
-        if not hasattr(self, '_name_to_subcategory') or self._name_to_subcategory is None:
-            self._name_to_subcategory = OOBTree()
-        return self._name_to_subcategory
+    def lw_name_to_subcategory(self) -> dict[str, Subcategory]:
+        """OOBTree: subcategory lowered name => subcategory entity"""
+        if not hasattr(self, '_lw_name_to_subcategory') or self._lw_name_to_subcategory is None:
+            self._lw_name_to_subcategory = OOBTree()
+        return self._lw_name_to_subcategory
 
     @property
     def subcategories_last_update(self) -> LastUpdateResult | None:

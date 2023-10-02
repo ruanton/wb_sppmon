@@ -64,13 +64,13 @@ def update_product_categories(app_root: AppRoot) -> None:
     """
     Fetch all product categories from the Wildberries website.
     Updates database: creates new categories, updates existing, does not delete disappearing ones.
-    Updates name_to_category and seo_to_category mappings.
+    Updates lw_name_to_category and lw_seo_to_category mappings.
     Raises exception on fetch or parse error.
     @param app_root: App Root persistent object
     """
     fetch_started_at, product_categories_list = fetch_categories()
 
-    new_cats_num, updated_cats_num, unchanged_cats_num, name_to_cat, seo_to_cat = 0, 0, 0, {}, {}
+    new_cats_num, updated_cats_num, unchanged_cats_num, lw_name_to_cat, lw_seo_to_cat = 0, 0, 0, {}, {}
     for cat_props in product_categories_list:
         # rename fields to conform persistent entity
         cat_id = cat_props['id']; del cat_props['id']
@@ -82,6 +82,7 @@ def update_product_categories(app_root: AppRoot) -> None:
             if category.fetched_at == fetch_started_at:
                 # we have already seen this ID in the response
                 raise UnexpectedResponse(f'several categories with the same ID: {category.name}, {cat_props["name"]}')
+
             if category.update(fetch_started_at, **cat_props):
                 updated_cats_num += 1
             else:
@@ -93,36 +94,38 @@ def update_product_categories(app_root: AppRoot) -> None:
             app_root.id_to_category[cat_id] = category
             new_cats_num += 1
 
-        # add the category to name_to_category dict
-        if category.name in name_to_cat:
+        # add the category to lw_name_to_category dict
+        lw_name = category.name.lower()
+        if lw_name in lw_name_to_cat:
             # a category or a set of categories with this name already exist in mapping
-            if isinstance(name_to_cat[category.name], Category):
-                name_to_cat[category.name] = {name_to_cat[category.name], category}  # convert to a set
+            if isinstance(lw_name_to_cat[lw_name], Category):
+                lw_name_to_cat[lw_name] = {lw_name_to_cat[lw_name], category}  # convert to a set
             else:
-                name_to_cat[category.name].add(category)  # add to the set
+                lw_name_to_cat[lw_name].add(category)  # add to the set
         else:
-            name_to_cat[category.name] = category  # set mapping to single entity
+            lw_name_to_cat[lw_name] = category  # set mapping to single entity
 
-        # add the category to seo_to_category dict
+        # add the category to lw_seo_to_category dict
         if category.seo:
-            if category.seo in seo_to_cat:
+            lw_seo = category.seo.lower()
+            if lw_seo in lw_seo_to_cat:
                 # a category or a set of categories with this seo already exist in mapping
-                if isinstance(seo_to_cat[category.seo], Category):
-                    seo_to_cat[category.seo] = {seo_to_cat[category.seo], category}  # convert to a set
+                if isinstance(lw_seo_to_cat[lw_seo], Category):
+                    lw_seo_to_cat[lw_seo] = {lw_seo_to_cat[lw_seo], category}  # convert to a set
                 else:
-                    seo_to_cat[category.seo].add(category)  # add to the set
+                    lw_seo_to_cat[lw_seo].add(category)  # add to the set
             else:
-                seo_to_cat[category.seo] = category  # set mapping to single entity
+                lw_seo_to_cat[lw_seo] = category  # set mapping to single entity
 
-    # update app_root.name_to_category persistent mapping if required, do not delete old names
-    for name, cat in name_to_cat.items():
-        if name not in app_root.name_to_category or app_root.name_to_category[name] != cat:
-            app_root.name_to_category[name] = cat
+    # update app_root.lw_name_to_category persistent mapping if required, do not delete old names
+    for lw_name, cat in lw_name_to_cat.items():
+        if lw_name not in app_root.lw_name_to_category or app_root.lw_name_to_category[lw_name] != cat:
+            app_root.lw_name_to_category[lw_name] = cat
 
-    # update app_root.seo_to_category persistent mapping if required, do not delete old seos
-    for seo, cat in seo_to_cat.items():
-        if seo not in app_root.seo_to_category or app_root.seo_to_category[seo] != cat:
-            app_root.seo_to_category[seo] = cat
+    # update app_root.lw_seo_to_category persistent mapping if required, do not delete old seos
+    for lw_seo, cat in lw_seo_to_cat.items():
+        if lw_seo not in app_root.lw_seo_to_category or app_root.lw_seo_to_category[lw_seo] != cat:
+            app_root.lw_seo_to_category[lw_seo] = cat
 
     app_root.categories_last_update = LastUpdateResult(
         fetched_at=fetch_started_at,
@@ -132,12 +135,14 @@ def update_product_categories(app_root: AppRoot) -> None:
     )
 
 
-def update_subcategories(category: Category):
+def update_subcategories(app_root: AppRoot, category: Category):
     """
     Fetch all subcategories for the given product category.
     Updates category entity: creates new subcategories, updates existing, but does not delete disappearing ones.
-    Updates name_to_subcategory mapping.
+    Updates category.lw_name_to_subcategory mapping.
+    Updates app_root.lw_name_to_subcategory mapping.
     Raises exception on fetch or parse error.
+    @param app_root: App Root persistent object
     @param category: Product category entity to update its subcategories
     """
     if not category.shard or not category.query:
@@ -145,44 +150,55 @@ def update_subcategories(category: Category):
 
     fetch_started_at, subcategories_list = fetch_subcategories(category.shard, cat_filter=category.query)
 
-    new_scats_num, updated_scats_num, unchanged_scats_num, name_to_scat = 0, 0, 0, {}
+    new_scats_num, updated_scats_num, unchanged_scats_num, lw_name_to_scat = 0, 0, 0, {}
     for scat_props in subcategories_list:
         scat_id = scat_props['id']; del scat_props['id']  # delete "id" field to conform persistent entity
-        scat_name = scat_props['name']
 
         if scat_id in category.id_to_subcategory:
             # get existing entity from database
-            subcategory = category.id_to_subcategory[scat_id]
-            if subcategory.fetched_at == fetch_started_at:
+            scat = category.id_to_subcategory[scat_id]
+            if scat.fetched_at == fetch_started_at:
                 # we have already seen this ID in the response
-                raise UnexpectedResponse(f'several subcategories with ID {scat_id}: {subcategory.name}, {scat_name}')
+                raise UnexpectedResponse(f'several sub-cats with ID {scat_id}: {scat.name}, {scat_props["name"]}')
 
-            if subcategory.update(fetch_started_at, **scat_props):
+            if scat.update(fetch_started_at, **scat_props):
                 updated_scats_num += 1
             else:
                 unchanged_scats_num += 1
 
         else:
             # create new entity
-            subcategory = Subcategory(id_=scat_id, **scat_props, fetched_at=fetch_started_at, category=category)
-            category.id_to_subcategory[scat_id] = subcategory
+            scat = Subcategory(id_=scat_id, **scat_props, fetched_at=fetch_started_at, category=category)
+            category.id_to_subcategory[scat_id] = scat
             new_scats_num += 1
 
-        # get existing subcategory with this name if any
-        ex_scat = category.name_to_subcategory[scat_name] if scat_name in category.name_to_subcategory else None
+        # get existing subcategory with this lowered name if any
+        lw_name = scat_props['name'].lower()
+        ex_scat = category.lw_name_to_subcategory[lw_name] if lw_name in category.lw_name_to_subcategory else None
 
         # verify we got no duplicates
-        if ex_scat and ex_scat.fetched_at == fetch_started_at and ex_scat != subcategory:
+        if ex_scat and ex_scat.fetched_at == fetch_started_at and ex_scat != scat:
             # we have already seen this name in the response
-            raise UnexpectedResponse(f'several sub cats with name {scat_name}: {scat_id}, {ex_scat.id}')
+            raise UnexpectedResponse(f'several sub cats with name {scat.name}: {scat_id}, {ex_scat.id}')
 
-        # if no existing subcategory, or it differs, update name_to_subcategory dict
-        if ex_scat != subcategory:
-            category.name_to_subcategory[scat_name] = subcategory
+        # if no existing subcategory, or it differs, update lw_name_to_subcategory dict
+        if ex_scat != scat:
+            category.lw_name_to_subcategory[lw_name] = scat
 
         # verify consistency
-        if subcategory.category != category:
-            raise RuntimeError(f'subcategory.category != category: {subcategory.category} != {category}')
+        if scat.category != category:
+            raise RuntimeError(f'subcategory.category != category: {scat.category} != {category}')
+
+        # update app_root.lw_name_to_subcategory mapping
+        if lw_name in app_root.lw_name_to_subcategory:
+            # a subcategory or a set of subcategories with this name already exist in mapping
+            if isinstance(app_root.lw_name_to_subcategory[lw_name], Subcategory):
+                # convert to a set
+                app_root.lw_name_to_subcategory[lw_name] = {app_root.lw_name_to_subcategory[lw_name], scat}
+            else:
+                app_root.lw_name_to_subcategory[lw_name].add(scat)  # add to the set
+        else:
+            app_root.lw_name_to_subcategory[lw_name] = scat  # set mapping to single entity
 
     # of for scat_props in subcategories_list
 
@@ -212,7 +228,7 @@ def update_all_categories_and_subcategories(app_root: AppRoot, conn: ZODB.Connec
         log.info(f'trying to update subcategories for {c}')
         try:
             with in_transaction(conn):
-                update_subcategories(c)
+                update_subcategories(app_root, c)
             lur = c.subcategories_last_update
             log.info(f'=== scats added: {lur.num_new}, updated: {lur.num_updated}, disappeared: {lur.num_gone}')
         except Exception as e:
@@ -258,9 +274,9 @@ def get_matched_items(settings: Settings, items: typing.Iterable[tuple[str, obje
 
 def find_categories(settings: Settings, app_root: AppRoot, search: str | int) -> set[Category]:
     """Find categories by ID, name or seo"""
-    id_to_cat = app_root.id_to_category;        id_to_cat: IOBTree
-    name_to_cat = app_root.name_to_category;    name_to_cat: OOBTree
-    seo_to_cat = app_root.seo_to_category;      seo_to_cat: OOBTree
+    id_to_cat = app_root.id_to_category;              id_to_cat: IOBTree
+    lw_name_to_cat = app_root.lw_name_to_category;    lw_name_to_cat: OOBTree
+    lw_seo_to_cat = app_root.lw_seo_to_category;      lw_seo_to_cat: OOBTree
 
     if isinstance(search, int) or search.isdigit():
         # search by category ID
@@ -273,8 +289,8 @@ def find_categories(settings: Settings, app_root: AppRoot, search: str | int) ->
         chars_stripped = 0
         while len(search) >= settings.search_min_chars and chars_stripped <= settings.search_max_suffix:
             key_max = search + chr(sys.maxunicode)
-            matched = get_matched_items(settings, name_to_cat.items(min=search, max=key_max), search)
-            matched.update(get_matched_items(settings, seo_to_cat.items(min=search, max=key_max), search))
+            matched = get_matched_items(settings, lw_name_to_cat.items(min=search, max=key_max), search)
+            matched.update(get_matched_items(settings, lw_seo_to_cat.items(min=search, max=key_max), search))
             if matched:
                 return matched
 
@@ -292,8 +308,8 @@ def find_subcategories(settings: Settings, category: Category, search: str | int
     @param settings: application settings
     @return: set of subcategories, can be empty
     """
-    id_to_scat = category.id_to_subcategory;       id_to_scat: IOBTree
-    name_to_scat = category.name_to_subcategory;   name_to_scat: OOBTree
+    id_to_scat = category.id_to_subcategory;             id_to_scat: IOBTree
+    lw_name_to_scat = category.lw_name_to_subcategory;   lw_name_to_scat: OOBTree
 
     if isinstance(search, int) or search.isdigit():
         # search by subcategory ID
@@ -306,7 +322,7 @@ def find_subcategories(settings: Settings, category: Category, search: str | int
         chars_stripped = 0
         while len(search) >= settings.search_min_chars and chars_stripped <= settings.search_max_suffix:
             key_max = search + chr(sys.maxunicode)
-            matched = get_matched_items(settings, name_to_scat.items(min=search, max=key_max), search)
+            matched = get_matched_items(settings, lw_name_to_scat.items(min=search, max=key_max), search)
             if matched:
                 return matched
 
