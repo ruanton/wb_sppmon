@@ -292,7 +292,7 @@ def find_categories(settings: Settings, app_root: AppRoot, search: str | int) ->
     if isinstance(search, int) or search.isdigit():
         # search by category ID
         cat_id = int(search)
-        return id_to_cat[cat_id] if cat_id in id_to_cat else set()
+        return {id_to_cat[cat_id]} if cat_id in id_to_cat else set()
 
     else:
         # search by category name or seo, case-insensitive
@@ -311,36 +311,57 @@ def find_categories(settings: Settings, app_root: AppRoot, search: str | int) ->
         return set()
 
 
-def find_subcategories_in_category(settings: Settings, category: Category, search: str | int) -> set[Subcategory]:
+def find_subcategories(settings: Settings, app_root: AppRoot, s_cat: str | int, s_scat: str | int) -> set[Subcategory]:
     """
-    Find subcategories in given category by ID or name
-    @param category: to find subcategories in
-    @param search: ID or string to search in name
+    Find subcategories by category and subcategory names or IDs.
+    If non-empty s_cat given, searches for categories first, next — for subcategories in found categories.
+    Else, search for subcategories in global app_root.*_to_subcategory indexes.
     @param settings: application settings
+    @param app_root: App Root persistent object
+    @param s_cat: string or ID to search categories
+    @param s_scat: string or ID to search subcategories
     @return: set of subcategories, can be empty
     """
-    id_to_scat = category.id_to_subcategory;             id_to_scat: IOBTree
-    lw_name_to_scat = category.lw_name_to_subcategory;   lw_name_to_scat: OOBTree
 
-    if isinstance(search, int) or search.isdigit():
-        # search by subcategory ID
-        scat_id = int(search)
-        return id_to_scat[scat_id] if scat_id in id_to_scat else set()
+    def _find_subcategories_in_container(container: Category | AppRoot, search: str | int) -> set[Subcategory]:
+        """
+        Find subcategories in given category or app_root by ID or name
+        @param container: Category or AppRoot with mappings
+        @param search: ID or string to search in name
+        @return: set of subcategories, can be empty
+        """
+        id_to_scat = container.id_to_subcategory;             id_to_scat: IOBTree
+        lw_name_to_scat = container.lw_name_to_subcategory;   lw_name_to_scat: OOBTree
 
-    else:
-        # search by sub category name, case-insensitive
-        search = search.lower()
-        chars_stripped = 0
-        while len(search) >= settings.search_min_chars and chars_stripped <= settings.search_max_suffix:
-            key_max = search + chr(sys.maxunicode)
-            matched = get_matched_items(settings, lw_name_to_scat.items(min=search, max=key_max), search)
-            if matched:
-                return matched
+        if isinstance(search, int) or search.isdigit():
+            # search by subcategory ID
+            scat_id = int(search)
+            scats_found = id_to_scat[scat_id] if scat_id in id_to_scat else set()
+            return scats_found if isinstance(scats_found, set) else {scats_found}
 
-            search = search[:-1]
-            chars_stripped += 1
+        else:
+            # search by sub category name, case-insensitive
+            search = search.lower()
+            chars_stripped = 0
+            while len(search) >= settings.search_min_chars and chars_stripped <= settings.search_max_suffix:
+                key_max = search + chr(sys.maxunicode)
+                matched = get_matched_items(settings, lw_name_to_scat.items(min=search, max=key_max), search)
+                if matched:
+                    return matched
 
-        return set()
+                search = search[:-1]
+                chars_stripped += 1
+
+            return set()
+
+    if s_cat:
+        cats = find_categories(settings, app_root, s_cat)
+        scats = set()
+        for cat in cats:
+            scats.update(_find_subcategories_in_container(cat, s_scat))
+        return scats
+
+    return _find_subcategories_in_container(app_root, s_scat)
 
 
 def main():
