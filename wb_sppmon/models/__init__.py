@@ -21,6 +21,7 @@ class AppRoot(persistent.Persistent):
         self._lw_seo_to_category = None
         self._categories_last_update = None
         self._lw_name_to_subcategory = None
+        self._id_to_subcategory = None
 
     @property
     def article_to_product(self) -> dict[str, wb.Product]:
@@ -65,6 +66,13 @@ class AppRoot(persistent.Persistent):
         if not hasattr(self, '_lw_name_to_subcategory') or self._lw_name_to_subcategory is None:
             self._lw_name_to_subcategory = OOBTree()
         return self._lw_name_to_subcategory
+
+    @property
+    def id_to_subcategory(self) -> dict[int, wb.Subcategory | set[wb.Subcategory]]:
+        """IOBTree: product subcategory ID => subcategory entity or a set of entities"""
+        if not hasattr(self, '_id_to_subcategory') or self._id_to_subcategory is None:
+            self._id_to_subcategory = IOBTree()
+        return self._id_to_subcategory
 
 
 def get_app_root(conn: ZODB.Connection.Connection) -> AppRoot:

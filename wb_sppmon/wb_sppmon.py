@@ -140,7 +140,7 @@ def update_subcategories(app_root: AppRoot, category: Category):
     Fetch all subcategories for the given product category.
     Updates category entity: creates new subcategories, updates existing, but does not delete disappearing ones.
     Updates category.lw_name_to_subcategory mapping.
-    Updates app_root.lw_name_to_subcategory mapping.
+    Updates app_root.lw_name_to_subcategory and app_root.id_to_subcategory mappings.
     Raises exception on fetch or parse error.
     @param app_root: App Root persistent object
     @param category: Product category entity to update its subcategories
@@ -199,6 +199,17 @@ def update_subcategories(app_root: AppRoot, category: Category):
                 app_root.lw_name_to_subcategory[lw_name].add(scat)  # add to the set
         else:
             app_root.lw_name_to_subcategory[lw_name] = scat  # set mapping to single entity
+
+        # update app_root.id_to_subcategory mapping
+        if scat_id in app_root.id_to_subcategory:
+            # a subcategory or a set of subcategories with this ID already exist in mapping
+            if isinstance(app_root.id_to_subcategory[scat_id], Subcategory):
+                # convert to a set and add subcategory
+                app_root.id_to_subcategory[scat_id] = {app_root.id_to_subcategory[scat_id], scat}
+            else:
+                app_root.id_to_subcategory[scat_id].add(scat)  # add to the set
+        else:
+            app_root.id_to_subcategory[scat_id] = scat  # set mapping to single entity
 
     # of for scat_props in subcategories_list
 
@@ -300,7 +311,7 @@ def find_categories(settings: Settings, app_root: AppRoot, search: str | int) ->
         return set()
 
 
-def find_subcategories(settings: Settings, category: Category, search: str | int) -> set[Subcategory]:
+def find_subcategories_in_category(settings: Settings, category: Category, search: str | int) -> set[Subcategory]:
     """
     Find subcategories in given category by ID or name
     @param category: to find subcategories in
