@@ -19,6 +19,12 @@ product_articles = %(here)s/product_articles.lst
 # file with WB product categories to monitor
 product_categories = %(here)s/product_categories.lst
 
+# minimum number of characters suitable for searching categories and subcategories
+search_min_chars = 3   """"""
+
+# maximum length of non-matching suffix
+search_max_suffix = 4
+
 
 ###
 # logging configuration

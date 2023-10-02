@@ -1,13 +1,20 @@
+import sys
 import logging
 import argparse
+import typing
 import ZODB.Connection
 from pyramid.paster import bootstrap, setup_logging
 from pyramid.registry import Registry
 from pyramid.request import Request
 from pyramid_zodbconn import get_connection
 
+# noinspection PyUnresolvedReferences
+from BTrees.OOBTree import OOBTree
+# noinspection PyUnresolvedReferences
+from BTrees.IOBTree import IOBTree
+
 # local imports
-from .params import Params
+from .params import Params, Settings
 from .wildberries import UnexpectedResponse, fetch_product_details, fetch_categories, fetch_subcategories
 from .models import AppRoot, get_app_root
 from .models.tcm import in_transaction
@@ -230,6 +237,85 @@ def dump_all_categories_and_subcategories(app_root: AppRoot):
                 print(f'{sc.id};{c.id};{sc.name};{c.name};{seo_str};{par_str};{qry_str};{url};{sc_fetched_at_str}')
 
 
+def get_matched_items(settings: Settings, items: typing.Iterable[tuple[str, object | set]], search: str) -> set:
+    """
+    Get all items with a key starting with a given string and the remaining suffix within the configured threshold
+    @param items: iterable to search in
+    @param search: searching string
+    @param settings: application settings
+    @return: set of matching objects, can be empty
+    """
+    matched = set()
+    for key, item in items:
+        if key.startswith(search) and len(key) <= len(search) + settings.search_max_suffix:
+            if isinstance(item, set):
+                matched.update(item)
+            else:
+                matched.add(item)
+
+    return matched
+
+
+def find_categories(settings: Settings, app_root: AppRoot, search: str | int) -> set[Category]:
+    """Find categories by ID, name or seo"""
+    id_to_cat = app_root.id_to_category;        id_to_cat: IOBTree
+    name_to_cat = app_root.name_to_category;    name_to_cat: OOBTree
+    seo_to_cat = app_root.seo_to_category;      seo_to_cat: OOBTree
+
+    if isinstance(search, int) or search.isdigit():
+        # search by category ID
+        cat_id = int(search)
+        return id_to_cat[cat_id] if cat_id in id_to_cat else set()
+
+    else:
+        # search by category name or seo, case-insensitive
+        search = search.lower()
+        chars_stripped = 0
+        while len(search) >= settings.search_min_chars and chars_stripped <= settings.search_max_suffix:
+            key_max = search + chr(sys.maxunicode)
+            matched = get_matched_items(settings, name_to_cat.items(min=search, max=key_max), search)
+            matched.update(get_matched_items(settings, seo_to_cat.items(min=search, max=key_max), search))
+            if matched:
+                return matched
+
+            search = search[:-1]
+            chars_stripped += 1
+
+        return set()
+
+
+def find_subcategories(settings: Settings, category: Category, search: str | int) -> set[Subcategory]:
+    """
+    Find subcategories in given category by ID or name
+    @param category: to find subcategories in
+    @param search: ID or string to search in name
+    @param settings: application settings
+    @return: set of subcategories, can be empty
+    """
+    id_to_scat = category.id_to_subcategory;       id_to_scat: IOBTree
+    name_to_scat = category.name_to_subcategory;   name_to_scat: OOBTree
+
+    if isinstance(search, int) or search.isdigit():
+        # search by subcategory ID
+        scat_id = int(search)
+        return id_to_scat[scat_id] if scat_id in id_to_scat else set()
+
+    else:
+        # search by sub category name, case-insensitive
+        search = search.lower()
+        chars_stripped = 0
+        while len(search) >= settings.search_min_chars and chars_stripped <= settings.search_max_suffix:
+            key_max = search + chr(sys.maxunicode)
+            matched = get_matched_items(settings, name_to_scat.items(min=search, max=key_max), search)
+            if matched:
+                return matched
+
+            search = search[:-1]
+            chars_stripped += 1
+
+        return set()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Wildberries SPP Monitor.')
     parser.add_argument('config_uri', help='The URI to the main configuration file.')
@@ -242,6 +328,7 @@ def main():
     with bootstrap(args.config_uri) as env:
         registry: Registry = env['registry']
         request: Request = env['request']
+        settings = Settings(registry.settings)  # application custom settings
 
         log.info('load and validate input params')
         params = Params(registry.settings)
