@@ -1,5 +1,6 @@
 import logging
 import argparse
+import ZODB.Connection
 from pyramid.paster import bootstrap, setup_logging
 from pyramid.registry import Registry
 from pyramid.request import Request
@@ -187,6 +188,48 @@ def update_subcategories(category: Category):
     )
 
 
+def update_all_categories_and_subcategories(app_root: AppRoot, conn: ZODB.Connection.Connection):
+    log.info('fetch, parse and save to database all product categories')
+    with in_transaction(conn):
+        update_product_categories(app_root)
+
+    lur = app_root.categories_last_update
+    log.info(f'=== categories added: {lur.num_new}, updated: {lur.num_updated}, disappeared: {lur.num_gone}')
+
+    log.info('update subcategories for all product categories')
+    for c in app_root.id_to_category.values():
+        if not c.query or not c.shard:
+            continue
+        # if cat.subcategories_last_update:
+        #     continue
+        log.info(f'trying to update subcategories for {c}')
+        try:
+            with in_transaction(conn):
+                update_subcategories(c)
+            lur = c.subcategories_last_update
+            log.info(f'=== scats added: {lur.num_new}, updated: {lur.num_updated}, disappeared: {lur.num_gone}')
+        except Exception as e:
+            log.warning(f'error: {e}')
+
+
+def dump_all_categories_and_subcategories(app_root: AppRoot):
+    log.info('print all categories and subcategories from the database')
+    print('Под;Кат;Подкатегория;Категория;Полное название категории;Род;Фильтр;URL;Обновлено')
+    for c in app_root.id_to_category.values():
+        url = c.url if c.url.startswith('http') else f'https://www.wildberries.ru{c.url}'
+        c_fetched_at_str = f'{c.fetched_at:%Y-%m-%d %H:%M}'
+        par_str = c.parent_id or ''
+        seo_str = c.seo or ''
+        qry_str = c.query or ''
+        # noinspection PyProtectedMember
+        if not c._id_to_subcategory:
+            print(f';{c.id};;{c.name};{seo_str};{par_str};{qry_str};{url};{c_fetched_at_str}')
+        else:
+            for sc in c.id_to_subcategory.values():
+                sc_fetched_at_str = f'{sc.fetched_at:%Y-%m-%d %H:%M}'
+                print(f'{sc.id};{c.id};{sc.name};{c.name};{seo_str};{par_str};{qry_str};{url};{sc_fetched_at_str}')
+
+
 def main():
     parser = argparse.ArgumentParser(description='Wildberries SPP Monitor.')
     parser.add_argument('config_uri', help='The URI to the main configuration file.')
@@ -220,28 +263,6 @@ def main():
         if exceptions:
             print(f'\n=== Failed to fetch details for product articles:')
             print('\n'.join([f'  {x}: {v}' for x, v in exceptions.items()]))
-
-        log.info('fetch, parse and save to database all product categories')
-        with in_transaction(conn):
-            update_product_categories(app_root)
-
-        lur = app_root.categories_last_update
-        print(f'=== Categories added: {lur.num_new}, updated: {lur.num_updated}, disappeared: {lur.num_gone}')
-
-        log.info('update subcategories for all product categories')
-        for cat in app_root.id_to_category.values():
-            if not cat.query or not cat.shard:
-                continue
-            if cat.subcategories_last_update:
-                continue
-            print(f'trying to update subcategories for {cat}')
-            try:
-                with in_transaction(conn):
-                    update_subcategories(cat)
-                lur = cat.subcategories_last_update
-                print(f'=== Scats added: {lur.num_new}, updated: {lur.num_updated}, disappeared: {lur.num_gone}')
-            except Exception as e:
-                log.warning(f'error: {e}')
 
 
 if __name__ == '__main__':
