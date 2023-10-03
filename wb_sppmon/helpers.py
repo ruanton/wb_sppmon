@@ -9,6 +9,9 @@ import requests
 import simplejson
 import urllib3.exceptions
 
+# local imports
+from .settings import settings
+
 
 def _json_serial(obj):
     """JSON serializer for objects not serializable by default json code"""
@@ -21,8 +24,13 @@ def json_dumps(obj) -> str:
     return simplejson.dumps(obj, indent=True, ensure_ascii=False, use_decimal=True, default=_json_serial)
 
 
-def http_get(url: str, retries: int = 5, random_retry_pause: float = 0.5, **kwargs):
-    """Perform HTTP-get request, retry several times on network errors"""
+def http_get(url: str, retries: int = None, base_retry_pause: float = None, **kwargs):
+    """Perform HTTP-get request, retry several times on network errors, with a random pause between retries"""
+    if retries is None:
+        retries = settings.http_retries
+    if base_retry_pause is None:
+        base_retry_pause = settings.http_base_retry_pause
+
     while True:
         try:
             resp = requests.get(url, **kwargs)
@@ -40,8 +48,8 @@ def http_get(url: str, retries: int = 5, random_retry_pause: float = 0.5, **kwar
             if retries <= 0:
                 raise
 
-        if random_retry_pause > 0:
-            time.sleep(random.uniform(random_retry_pause/2.0, random_retry_pause))
+        if base_retry_pause > 0:
+            time.sleep(random.uniform(base_retry_pause / 2.0, base_retry_pause))
 
         retries -= 1
 

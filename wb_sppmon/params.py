@@ -2,6 +2,8 @@
 Input params
 """
 
+from .settings import settings
+
 
 def _read_lines(filename: str) -> list[str]:
     """
@@ -19,60 +21,60 @@ def _read_lines(filename: str) -> list[str]:
     return lines_filtered
 
 
-class ProductCategoryParams:
-    """Params for monitoring Wildberries product category"""
+class ProductSubcategoryParams:
+    """Params for monitoring Wildberries product subcategory"""
     def __init__(self, input_line: str):
-        """Parse and validate product category params input line"""
+        """Parse and validate product subcategory params input line"""
         tokens = [x.strip() for x in input_line.split(',')]
         try:
             self.price_step = int(tokens.pop().strip())
             self.price_max = int(tokens.pop().strip())
             self.price_min = int(tokens.pop().strip())
-            self.product_name = tokens.pop().strip()
-            self.category_name = tokens.pop().strip()
+            self.subcategory_search = tokens.pop().strip()
+            self.category_search = tokens.pop().strip()
             if tokens:
                 raise ValueError('too many columns to unpack')
-            if not self.product_name:
-                raise ValueError(f'product name is empty')
-            if not self.category_name:
-                raise ValueError(f'category name is empty')
+            if not self.subcategory_search:
+                raise ValueError(f'subcategory is empty')
             if not 0 <= self.price_min <= self.price_max:
                 raise ValueError(f'not 0 <= {self.price_min} <= {self.price_max}')
             if not 0 <= self.price_step <= self.price_max - self.price_min:
                 raise ValueError(f'not 0 <= {self.price_step} <= {self.price_max} - {self.price_min}')
 
         except Exception as e:
-            raise ValueError(f'invalid product category params: {input_line}: {e}') from e
+            raise ValueError(f'invalid product subcategory params: {input_line}: {e}') from e
 
     def __str__(self):
-        return f'{self.category_name}, {self.product_name}, {self.price_min}, {self.price_max}, {self.price_step}'
+        return (
+            f'{self.subcategory_search}, {self.category_search}, '
+            f'{self.price_min}, {self.price_max}, {self.price_step}'
+        )
 
 
 class Params:
     """Input params"""
-    def __init__(self, settings: dict):
+    def __init__(self):
         """
-        Load and validate input params from settings.
-        @param settings: dictionary from config file main section
+        Load and validate input params from global settings and auxiliary files.
         """
-        self.admin_emails = _read_lines(settings['admin_emails'])
-        if any('@' not in x for x in self.admin_emails):
-            raise ValueError(f'invalid admin emails')
+        self.contacts_admins = _read_lines(settings.contacts_admins_file)
+        if any(not x.startswith('telegram:') or not x.split(':')[1].isdigit() for x in self.contacts_admins):
+            raise ValueError(f'invalid admins contacts')
 
-        self.report_emails = _read_lines(settings['report_emails'])
-        if any('@' not in x for x in self.report_emails):
-            raise ValueError(f'invalid report emails')
+        self.contacts_users = _read_lines(settings.contacts_users_file)
+        if any(not x.startswith('telegram:') or not x.split(':')[1].isdigit() for x in self.contacts_users):
+            raise ValueError(f'invalid users contacts')
 
-        self.product_articles = _read_lines(settings['product_articles'])
+        self.monitor_articles = _read_lines(settings.monitor_articles_file)
 
-        product_categories_lines = _read_lines(settings['product_categories'])
-        self.product_categories = [ProductCategoryParams(x) for x in product_categories_lines]
+        monitor_subcategories_lines = _read_lines(settings.monitor_subcategories_file)
+        self.monitor_subcategories = [ProductSubcategoryParams(x) for x in monitor_subcategories_lines]
 
     def __str__(self) -> str:
         lines = [
-            f'admin emails: {", ".join(self.admin_emails)}',
-            f'report emails: {", ".join(self.report_emails)}',
-            f'product articles: {", ".join(self.product_articles)}',
-            f'product categories:'
-        ] + [f'  {x}' for x in self.product_categories]
+            f'contacts admins: {", ".join(self.contacts_admins)}',
+            f'contacts users: {", ".join(self.contacts_users)}',
+            f'monitor articles: {", ".join(self.monitor_articles)}',
+            f'monitor subcategories:'
+        ] + [f'  {x}' for x in self.monitor_subcategories]
         return '\n'.join(lines)

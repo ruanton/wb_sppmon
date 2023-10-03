@@ -4,7 +4,6 @@ import argparse
 import typing
 import ZODB.Connection
 from pyramid.paster import bootstrap, setup_logging
-from pyramid.registry import Registry
 from pyramid.request import Request
 from pyramid_zodbconn import get_connection
 
@@ -338,11 +337,11 @@ def main():
 
     # bootstrap Pyramid environment to get configuration
     with bootstrap(args.config_uri) as env:
-        registry: Registry = env['registry']
+        # registry: pyramid.registry.Registry = env['registry']
         request: Request = env['request']
 
         log.info('load and validate input params')
-        params = Params(registry.settings)
+        params = Params()
         print(f'=== Inputs:\n{params}\n')
 
         log.info('get database connection and App Root object')
@@ -351,7 +350,7 @@ def main():
 
         log.info('try to fetch product updates for all articles from input params')
         with in_transaction(conn):
-            products, new_products_num, exceptions = fetch_product_updates(app_root, params.product_articles)
+            products, new_products_num, exceptions = fetch_product_updates(app_root, params.monitor_articles)
 
         if new_products_num:
             print(f'=== New products: {new_products_num}')

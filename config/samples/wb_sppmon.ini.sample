@@ -7,23 +7,42 @@
 use = egg:wb_sppmon
 zodbconn.uri = file://%(here)s/../zodb-data/Data.fs?connection_cache_size=20000
 
-# file with email addresses where to send script errors
-admin_emails = %(here)s/admin_emails.lst
+# file with contacts of administrators where to send script errors
+contacts_admins_file = %(here)s/contacts_admins.lst
 
-# file with email addresses where to send SPP changes
-report_emails = %(here)s/report_emails.lst
+# file with contacts of users where to send reports
+contacts_users_file = %(here)s/contacts_users.lst
+
+# telegram bot API token
+# suppress inspection "SpellCheckingInspection"
+telegram_bot_token = 1234567890:someVerySecretToken
+
+# report errors for the same entity no more often than one per this number of minutes
+report_errors_delay_interval = 120
+
+# report changes for the same entity no more often than one per this number of minutes
+report_changes_delay_interval = 10
 
 # file with WB article numbers to monitor
-product_articles = %(here)s/product_articles.lst
+monitor_articles_file = %(here)s/monitor_articles.lst
 
 # file with WB product categories to monitor
-product_categories = %(here)s/product_categories.lst
+monitor_subcategories_file = %(here)s/monitor_subcategories.lst
 
-# minimum number of characters suitable for searching categories and subcategories
-search_min_chars = 3   """"""
+# if matched more subcategories for any input category, reject all those subcategories
+max_matched_subcategories = 3
+
+# minimum number of characters suitable for imprecise text searching
+search_min_chars = 3
 
 # maximum length of non-matching suffix
 search_max_suffix = 4
+
+# default number of HTTP request retries
+http_retries = 3
+
+# default base of random pause between retries of failed HTTP requests
+http_base_retry_pause = 0.5
 
 
 ###
