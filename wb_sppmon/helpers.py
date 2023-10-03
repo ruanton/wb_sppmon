@@ -34,10 +34,22 @@ def http_request(method: str, url: str, retries: int = None, base_retry_pause: f
     while True:
         try:
             resp = requests.request(method, url, **kwargs)
-            if resp.status_code != 200:
-                raise urllib3.exceptions.HTTPError(f'status_code={resp.status_code}, reason: {resp.reason}')
+            if resp.status_code == 200:
+                return resp
 
-            return resp
+            if resp.status_code < 500:
+                # permanent error, do not retry
+                retries = 0
+
+            reason = resp.reason
+            try:
+                json = resp.json()
+                if 'description' in json:
+                    reason = json['description']
+            except (RuntimeError, ValueError, IOError, KeyError):
+                pass
+
+            raise urllib3.exceptions.HTTPError(f'http_code={resp.status_code}: {reason}')
 
         except (urllib3.exceptions.HTTPError, IOError, TimeoutError, ConnectionResetError):
             # also catches all inherited types, including:
