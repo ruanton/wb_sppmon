@@ -2,8 +2,6 @@
 Input params
 """
 
-import inspect
-
 
 def _read_lines(filename: str) -> list[str]:
     """
@@ -19,36 +17,6 @@ def _read_lines(filename: str) -> list[str]:
     lines_filtered = [x.strip() for x in lines if x.strip() and not x.strip().startswith('#')]
 
     return lines_filtered
-
-
-class Settings:
-    """Global application settings from config file"""
-    def __init__(self, settings_dict: dict[str, str]):
-        self.settings_dict = settings_dict
-
-    def _get_int_param(self) -> int:
-        param_key = inspect.currentframe().f_back.f_code.co_name  # the calling function name
-        try:
-            value = int(self.settings_dict[param_key])
-            return value
-        except Exception as e:
-            raise ValueError(f'invalid or misconfigured integer parameter "{param_key}": {e}')
-
-    def _get_str_param(self) -> str:
-        param_key = inspect.currentframe().f_back.f_code.co_name  # the calling function name
-        try:
-            value = self.settings_dict[param_key]
-            return value
-        except Exception as e:
-            raise ValueError(f'invalid or misconfigured string parameter "{param_key}": {e}')
-
-    @property
-    def search_min_chars(self) -> int:
-        return self._get_int_param()
-
-    @property
-    def search_max_suffix(self) -> int:
-        return self._get_int_param()
 
 
 class ProductCategoryParams:

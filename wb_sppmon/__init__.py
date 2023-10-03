@@ -25,5 +25,6 @@ def main(global_config, **settings):
     with pyramid.config.Configurator(settings=settings) as config:
         config.include('pyramid_tm')
         config.include('pyramid_zodbconn')
+        config.include('.settings')
         config.set_root_factory(root_factory)
     return config.make_wsgi_app()

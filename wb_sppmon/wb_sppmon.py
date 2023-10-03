@@ -14,7 +14,8 @@ from BTrees.OOBTree import OOBTree
 from BTrees.IOBTree import IOBTree
 
 # local imports
-from .params import Params, Settings
+from .params import Params
+from .settings import settings
 from .wildberries import UnexpectedResponse, fetch_product_details, fetch_categories, fetch_subcategories
 from .models import AppRoot, get_app_root
 from .models.tcm import in_transaction
@@ -264,12 +265,11 @@ def dump_all_categories_and_subcategories(app_root: AppRoot):
                 print(f'{sc.id};{c.id};{sc.name};{c.name};{seo_str};{par_str};{qry_str};{url};{sc_fetched_at_str}')
 
 
-def get_matched_items(settings: Settings, items: typing.Iterable[tuple[str, object | set]], search: str) -> set:
+def get_matched_items(items: typing.Iterable[tuple[str, object | set]], search: str) -> set:
     """
     Get all items with a key starting with a given string and the remaining suffix within the configured threshold
     @param items: iterable to search in
     @param search: searching string
-    @param settings: application settings
     @return: set of matching objects, can be empty
     """
     matched = set()
@@ -283,7 +283,7 @@ def get_matched_items(settings: Settings, items: typing.Iterable[tuple[str, obje
     return matched
 
 
-def find_categories(settings: Settings, app_root: AppRoot, search: str | int) -> set[Category]:
+def find_categories(app_root: AppRoot, search: str | int) -> set[Category]:
     """Find categories by ID, name or seo"""
     id_to_cat = app_root.id_to_category;              id_to_cat: IOBTree
     lw_name_to_cat = app_root.lw_name_to_category;    lw_name_to_cat: OOBTree
@@ -300,8 +300,8 @@ def find_categories(settings: Settings, app_root: AppRoot, search: str | int) ->
         chars_stripped = 0
         while len(search) >= settings.search_min_chars and chars_stripped <= settings.search_max_suffix:
             key_max = search + chr(sys.maxunicode)
-            matched = get_matched_items(settings, lw_name_to_cat.items(min=search, max=key_max), search)
-            matched.update(get_matched_items(settings, lw_seo_to_cat.items(min=search, max=key_max), search))
+            matched = get_matched_items(lw_name_to_cat.items(min=search, max=key_max), search)
+            matched.update(get_matched_items(lw_seo_to_cat.items(min=search, max=key_max), search))
             if matched:
                 return matched
 
@@ -311,12 +311,11 @@ def find_categories(settings: Settings, app_root: AppRoot, search: str | int) ->
         return set()
 
 
-def find_subcategories(settings: Settings, app_root: AppRoot, s_cat: str | int, s_scat: str | int) -> set[Subcategory]:
+def find_subcategories(app_root: AppRoot, s_cat: str | int, s_scat: str | int) -> set[Subcategory]:
     """
     Find subcategories by category and subcategory names or IDs.
     If non-empty s_cat given, searches for categories first, next — for subcategories in found categories.
     Else, search for subcategories in global app_root.*_to_subcategory indexes.
-    @param settings: application settings
     @param app_root: App Root persistent object
     @param s_cat: string or ID to search categories
     @param s_scat: string or ID to search subcategories
@@ -345,7 +344,7 @@ def find_subcategories(settings: Settings, app_root: AppRoot, s_cat: str | int, 
             chars_stripped = 0
             while len(search) >= settings.search_min_chars and chars_stripped <= settings.search_max_suffix:
                 key_max = search + chr(sys.maxunicode)
-                matched = get_matched_items(settings, lw_name_to_scat.items(min=search, max=key_max), search)
+                matched = get_matched_items(lw_name_to_scat.items(min=search, max=key_max), search)
                 if matched:
                     return matched
 
@@ -355,7 +354,7 @@ def find_subcategories(settings: Settings, app_root: AppRoot, s_cat: str | int, 
             return set()
 
     if s_cat:
-        cats = find_categories(settings, app_root, s_cat)
+        cats = find_categories(app_root, s_cat)
         scats = set()
         for cat in cats:
             scats.update(_find_subcategories_in_container(cat, s_scat))
@@ -376,7 +375,6 @@ def main():
     with bootstrap(args.config_uri) as env:
         registry: Registry = env['registry']
         request: Request = env['request']
-        settings = Settings(registry.settings)  # application custom settings
 
         log.info('load and validate input params')
         params = Params(registry.settings)
