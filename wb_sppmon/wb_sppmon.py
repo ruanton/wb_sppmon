@@ -16,6 +16,7 @@ from BTrees.IOBTree import IOBTree
 # local imports
 from .params import Params
 from .settings import settings
+from .idx_utils import idx_update
 from .wildberries import UnexpectedResponse, fetch_product_details, fetch_categories, fetch_subcategories
 from .models import AppRoot, get_app_root
 from .models.tcm import in_transaction
@@ -95,28 +96,10 @@ def update_product_categories(app_root: AppRoot) -> None:
             app_root.id_to_category[cat_id] = category
             new_cats_num += 1
 
-        # add the category to lw_name_to_category dict
-        lw_name = category.name.lower()
-        if lw_name in lw_name_to_cat:
-            # a category or a set of categories with this name already exist in mapping
-            if isinstance(lw_name_to_cat[lw_name], Category):
-                lw_name_to_cat[lw_name] = {lw_name_to_cat[lw_name], category}  # convert to a set
-            else:
-                lw_name_to_cat[lw_name].add(category)  # add to the set
-        else:
-            lw_name_to_cat[lw_name] = category  # set mapping to single entity
-
-        # add the category to lw_seo_to_category dict
+        # update indexes
+        idx_update(lw_name_to_cat, key=category.name.lower(), element=category)
         if category.seo:
-            lw_seo = category.seo.lower()
-            if lw_seo in lw_seo_to_cat:
-                # a category or a set of categories with this seo already exist in mapping
-                if isinstance(lw_seo_to_cat[lw_seo], Category):
-                    lw_seo_to_cat[lw_seo] = {lw_seo_to_cat[lw_seo], category}  # convert to a set
-                else:
-                    lw_seo_to_cat[lw_seo].add(category)  # add to the set
-            else:
-                lw_seo_to_cat[lw_seo] = category  # set mapping to single entity
+            idx_update(lw_seo_to_cat, key=category.seo.lower(), element=category)
 
     # update app_root.lw_name_to_category persistent mapping if required, do not delete old names
     for lw_name, cat in lw_name_to_cat.items():
@@ -190,27 +173,9 @@ def update_subcategories(app_root: AppRoot, category: Category):
         if scat.category != category:
             raise RuntimeError(f'subcategory.category != category: {scat.category} != {category}')
 
-        # update app_root.lw_name_to_subcategory mapping
-        if lw_name in app_root.lw_name_to_subcategory:
-            # a subcategory or a set of subcategories with this name already exist in mapping
-            if isinstance(app_root.lw_name_to_subcategory[lw_name], Subcategory):
-                # convert to a set
-                app_root.lw_name_to_subcategory[lw_name] = {app_root.lw_name_to_subcategory[lw_name], scat}
-            else:
-                app_root.lw_name_to_subcategory[lw_name].add(scat)  # add to the set
-        else:
-            app_root.lw_name_to_subcategory[lw_name] = scat  # set mapping to single entity
-
-        # update app_root.id_to_subcategory mapping
-        if scat_id in app_root.id_to_subcategory:
-            # a subcategory or a set of subcategories with this ID already exist in mapping
-            if isinstance(app_root.id_to_subcategory[scat_id], Subcategory):
-                # convert to a set and add subcategory
-                app_root.id_to_subcategory[scat_id] = {app_root.id_to_subcategory[scat_id], scat}
-            else:
-                app_root.id_to_subcategory[scat_id].add(scat)  # add to the set
-        else:
-            app_root.id_to_subcategory[scat_id] = scat  # set mapping to single entity
+        # update indexes
+        idx_update(app_root.lw_name_to_subcategory, key=lw_name, element=scat)
+        idx_update(app_root.id_to_subcategory, key=scat_id, element=scat)
 
     # of for scat_props in subcategories_list
 
