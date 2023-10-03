@@ -2,6 +2,7 @@ import sys
 import logging
 import argparse
 import typing
+import html
 import ZODB.Connection
 from pyramid.paster import bootstrap, setup_logging
 from pyramid.request import Request
@@ -16,6 +17,7 @@ from BTrees.IOBTree import IOBTree
 from .params import Params
 from .settings import settings
 from .idx_utils import idx_update
+from .telegram import send_to_telegram_multiple
 from .wildberries import UnexpectedResponse, fetch_product_details, fetch_categories, fetch_subcategories
 from .models import AppRoot, get_app_root
 from .models.tcm import in_transaction
@@ -327,6 +329,88 @@ def find_subcategories(app_root: AppRoot, s_cat: str | int, s_scat: str | int) -
     return _find_subcategories_in_container(app_root, s_scat)
 
 
+def send_spp_changes_report(contacts: list[str], products: list[Product]) -> dict[str, Exception]:
+    """
+    Send report about SPP changes for all given products.
+    @return: contact => Exception, for all send failures.
+    """
+    report_lines = ['<b>Изменения СПП</b>', '↓']
+    for p in products:
+        report_lines.append(
+            f'{p.fetched_at:%Y-%m-%d %H:%M}: "{html.escape(p.name)}", арт. {html.escape(p.article)}, цена {p.price}, '
+            f'со скидкой {p.price_sale}, СПП <b>{p.discount_client}</b>'
+        )
+        descr_was = f'было {p.old_values["fetched_at"]:%Y-%m-%d %H:%M}: СПП <b>{p.old_values["discount_client"]}</b>'
+        if 'name' in p.old_values:
+            descr_was += f', название "{html.escape(p.old_values["name"])}"'
+        if 'price' in p.old_values:
+            descr_was += f', цена {p.old_values["price"]}'
+        report_lines.append(descr_was)
+        report_lines.append('')
+
+    report_text = '\n'.join(report_lines)
+    return send_to_telegram_multiple(settings.telegram_bot_token, contacts, report_text)
+
+
+def monitor_articles(app_root: AppRoot, params: Params, conn: ZODB.Connection.Connection) -> dict[str, Exception]:
+    """
+    Fetch product updates and send report to all users in case of SPP change. Does all in a new transaction.
+    If any SPP changed, and it was not possible to send a report to at least one contact, rollbacks transaction.
+    @return: failed entity descriptor => Exception, for each failure
+    """
+    class SilentlyRollbackTransaction(Exception):
+        pass
+
+    failures = {}
+    try:
+        with in_transaction(conn):
+            products, new_products_num, article_failures = fetch_product_updates(app_root, params.monitor_articles)
+            log.info(f'fetched new: {new_products_num}, updated: {len(products)}, failed: {len(article_failures)}')
+            failures.update({
+                f'article:{k}': v for k, v in article_failures.items()
+            })
+
+            # filter products with changed SPP
+            products_spp_changed = [x for x in products if 'discount_client' in x.old_values]  # SPP changed
+            if products_spp_changed:
+                # there are products with changed SPP, create report text
+                send_failures = send_spp_changes_report(params.contacts_users, products_spp_changed)
+                failures.update({
+                    f'send to {k}': v for k, v in send_failures.items()
+                })
+
+                if len(send_failures) == len(params.contacts_users):
+                    # failed to send a report to at least one user, raise an exception to rollback database changes
+                    raise SilentlyRollbackTransaction()
+
+    except SilentlyRollbackTransaction:
+        pass
+
+    return failures
+
+
+def send_admin_report(params: Params, failures: dict[str, Exception]):
+    """
+    Send error report to all configured admin contacts.
+    If it was not possible to send a report to at least one admin contact, raises an exception.
+    In case of some admin contacts failed, sends additional error report about that to other admin contacts.
+    """
+    def _send_failures_to_admins(header: str, failures_: dict[str, Exception]) -> dict[str, Exception]:
+        report_text = '\n'.join([f'<b>{header}</b>', '↓'] + [
+            f'• {html.escape(k)}: {html.escape(str(v))}' for k, v in failures_.items()
+        ] + [''])
+
+        send_failures_ = send_to_telegram_multiple(settings.telegram_bot_token, params.contacts_admins, report_text)
+        if len(send_failures_) == len(params.contacts_admins):
+            raise RuntimeError(f'failed to send error report to any of configured admin contacts')
+
+        return send_failures_
+
+    send_failures = _send_failures_to_admins('Failures', failures)
+    if send_failures:
+        _send_failures_to_admins('Cannot send error report to the following contacts', send_failures)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Wildberries SPP Monitor.')
     parser.add_argument('config_uri', help='The URI to the main configuration file.')
@@ -342,24 +426,17 @@ def main():
 
         log.info('load and validate input params')
         params = Params()
-        print(f'=== Inputs:\n{params}\n')
 
         log.info('get database connection and App Root object')
-        conn = get_connection(request)
+        conn: ZODB.Connection.Connection = get_connection(request)
         app_root = get_app_root(conn)
 
-        log.info('try to fetch product updates for all articles from input params')
-        with in_transaction(conn):
-            products, new_products_num, exceptions = fetch_product_updates(app_root, params.monitor_articles)
+        log.info('try to fetch product updates for all configured articles')
+        failures = monitor_articles(app_root, params, conn)
 
-        if new_products_num:
-            print(f'=== New products: {new_products_num}')
-        if products:
-            print(f'=== Updated products:')
-            print('\n'.join([f'  {v}, old_values: {v.old_values}' for v in products]))
-        if exceptions:
-            print(f'\n=== Failed to fetch details for product articles:')
-            print('\n'.join([f'  {x}: {v}' for x, v in exceptions.items()]))
+        if failures:
+            log.info(f'sending errors report to admins')
+            send_admin_report(params, failures)
 
 
 if __name__ == '__main__':
