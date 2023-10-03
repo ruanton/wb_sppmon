@@ -24,8 +24,8 @@ def json_dumps(obj) -> str:
     return simplejson.dumps(obj, indent=True, ensure_ascii=False, use_decimal=True, default=_json_serial)
 
 
-def http_get(url: str, retries: int = None, base_retry_pause: float = None, **kwargs):
-    """Perform HTTP-get request, retry several times on network errors, with a random pause between retries"""
+def http_request(method: str, url: str, retries: int = None, base_retry_pause: float = None, **kwargs):
+    """Perform HTTP request, retry several times on network errors, with a random pause between retries"""
     if retries is None:
         retries = settings.http_retries
     if base_retry_pause is None:
@@ -33,7 +33,7 @@ def http_get(url: str, retries: int = None, base_retry_pause: float = None, **kw
 
     while True:
         try:
-            resp = requests.get(url, **kwargs)
+            resp = requests.request(method, url, **kwargs)
             if resp.status_code != 200:
                 raise urllib3.exceptions.HTTPError(f'status_code={resp.status_code}, reason: {resp.reason}')
 
@@ -52,6 +52,11 @@ def http_get(url: str, retries: int = None, base_retry_pause: float = None, **kw
             time.sleep(random.uniform(base_retry_pause / 2.0, base_retry_pause))
 
         retries -= 1
+
+
+def http_get(url: str, retries: int = None, base_retry_pause: float = None, **kwargs):
+    """Perform HTTP-get request, retry several times on network errors, with a random pause between retries"""
+    return http_request('get', url, retries, base_retry_pause, **kwargs)
 
 
 def update_object(obj: object, **kwargs) -> dict:
