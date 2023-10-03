@@ -4,6 +4,7 @@ import argparse
 import typing
 import html
 import ZODB.Connection
+from datetime import datetime
 from pyramid.paster import bootstrap, setup_logging
 from pyramid.request import Request
 from pyramid_zodbconn import get_connection
@@ -24,6 +25,11 @@ from .models.tcm import in_transaction
 from .models.wb import LastUpdateResult, Product, Category, Subcategory
 
 log = logging.getLogger(__name__)
+
+
+def dt_fmt(dt: datetime) -> str:
+    """Format date/time in local timezone, minutes precision"""
+    return f'{dt.astimezone():%Y-%m-%d %H:%M}'
 
 
 def fetch_product_updates(app_root: AppRoot, articles: list[str]) -> tuple[list[Product], int, dict[str, Exception]]:
@@ -218,7 +224,7 @@ def dump_all_categories_and_subcategories(app_root: AppRoot):
     print('Под;Кат;Подкатегория;Категория;Полное название категории;Род;Фильтр;URL;Обновлено')
     for c in app_root.id_to_category.values():
         url = c.url if c.url.startswith('http') else f'https://www.wildberries.ru{c.url}'
-        c_fetched_at_str = f'{c.fetched_at:%Y-%m-%d %H:%M}'
+        c_fetched_at_str = dt_fmt(c.fetched_at)
         par_str = c.parent_id or ''
         seo_str = c.seo or ''
         qry_str = c.query or ''
@@ -227,7 +233,7 @@ def dump_all_categories_and_subcategories(app_root: AppRoot):
             print(f';{c.id};;{c.name};{seo_str};{par_str};{qry_str};{url};{c_fetched_at_str}')
         else:
             for sc in c.id_to_subcategory.values():
-                sc_fetched_at_str = f'{sc.fetched_at:%Y-%m-%d %H:%M}'
+                sc_fetched_at_str = dt_fmt(sc.fetched_at)
                 print(f'{sc.id};{c.id};{sc.name};{c.name};{seo_str};{par_str};{qry_str};{url};{sc_fetched_at_str}')
 
 
@@ -337,10 +343,10 @@ def send_spp_changes_report(contacts: list[str], products: list[Product]) -> dic
     report_lines = ['<b>Изменения СПП</b>', '↓']
     for p in products:
         report_lines.append(
-            f'{p.fetched_at:%Y-%m-%d %H:%M}: "{html.escape(p.name)}", арт. {html.escape(p.article)}, цена {p.price}, '
+            f'{dt_fmt(p.fetched_at)}: "{html.escape(p.name)}", арт. {html.escape(p.article)}, цена {p.price}, '
             f'со скидкой {p.price_sale}, СПП <b>{p.discount_client}</b>'
         )
-        descr_was = f'было {p.old_values["fetched_at"]:%Y-%m-%d %H:%M}: СПП <b>{p.old_values["discount_client"]}</b>'
+        descr_was = f'было {dt_fmt(p.old_values["fetched_at"])}: СПП <b>{p.old_values["discount_client"]}</b>'
         if 'name' in p.old_values:
             descr_was += f', название "{html.escape(p.old_values["name"])}"'
         if 'price' in p.old_values:
