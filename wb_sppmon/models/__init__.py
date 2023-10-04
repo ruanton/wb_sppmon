@@ -1,3 +1,4 @@
+import datetime
 import ZODB.Connection
 import persistent
 import persistent.mapping
@@ -22,6 +23,7 @@ class AppRoot(persistent.Persistent):
         self._categories_last_update = None
         self._lw_name_to_subcategory = None
         self._id_to_subcategory = None
+        self._entity_descr_to_report_sent_at = None
 
     @property
     def article_to_product(self) -> dict[str, wb.Product]:
@@ -73,6 +75,13 @@ class AppRoot(persistent.Persistent):
         if not hasattr(self, '_id_to_subcategory') or self._id_to_subcategory is None:
             self._id_to_subcategory = IOBTree()
         return self._id_to_subcategory
+
+    @property
+    def entity_descr_to_report_sent_at(self) -> dict[str, datetime.datetime]:
+        """OOBTree: entity descriptor => date/time when a report was sent for this entity"""
+        if not hasattr(self, '_entity_descr_to_report_sent_at') or self._entity_descr_to_report_sent_at is None:
+            self._entity_descr_to_report_sent_at = OOBTree()
+        return self._entity_descr_to_report_sent_at
 
 
 def get_app_root(conn: ZODB.Connection.Connection) -> AppRoot:

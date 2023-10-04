@@ -4,7 +4,7 @@ import argparse
 import typing
 import html
 import ZODB.Connection
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pyramid.paster import bootstrap, setup_logging
 from pyramid.request import Request
 from pyramid_zodbconn import get_connection
@@ -335,27 +335,45 @@ def find_subcategories(app_root: AppRoot, s_cat: str | int, s_scat: str | int) -
     return _find_subcategories_in_container(app_root, s_scat)
 
 
-def send_spp_changes_report(contacts: list[str], products: list[Product]) -> dict[str, Exception]:
+def send_spp_changes_report(app_root: AppRoot, contacts: list[str], products: list[Product]) -> dict[str, Exception]:
     """
     Send report about SPP changes for all given products.
+    Conforms and updates ``app_root.entity_descr_to_report_sent_at`` index.
     @return: contact => Exception, for all send failures.
     """
+    # filter out products for whose report was recently sent
+    idx = app_root.entity_descr_to_report_sent_at
+    dt_past = datetime.now(timezone.utc) - timedelta(minutes=settings.report_changes_delay_interval)
+    products = [x for x in products if f'article:{x.article}' not in idx or idx[f'article:{x.article}'] < dt_past]
+    if not products:
+        return {}
+
     report_lines = ['<b>Изменения СПП</b>', '↓']
     for p in products:
         report_lines.append(
             f'{dt_fmt(p.fetched_at)}: "{html.escape(p.name)}", арт. {html.escape(p.article)}, цена {p.price}, '
             f'со скидкой {p.price_sale}, СПП <b>{p.discount_client}</b>'
         )
-        descr_was = f'было {dt_fmt(p.old_values["fetched_at"])}: СПП <b>{p.old_values["discount_client"]}</b>'
+        descr_was = f'{dt_fmt(p.old_values["fetched_at"])} было: СПП <b>{p.old_values["discount_client"]}</b>'
         if 'name' in p.old_values:
             descr_was += f', название "{html.escape(p.old_values["name"])}"'
         if 'price' in p.old_values:
             descr_was += f', цена {p.old_values["price"]}'
+        if 'price_sale' in p.old_values:
+            descr_was += f', цена со скидкой {p.old_values["price_sale"]}'
         report_lines.append(descr_was)
         report_lines.append('')
 
     report_text = '\n'.join(report_lines)
-    return send_to_telegram_multiple(settings.telegram_bot_token, contacts, report_text)
+    log.info(f'send changes report to users')
+    send_errors = send_to_telegram_multiple(settings.telegram_bot_token, contacts, report_text)
+
+    if any(x not in send_errors for x in contacts):
+        # report was sent to at least one recipient, save the current date/time in the index
+        for p in products:
+            idx[f'article:{p.article}'] = datetime.now(timezone.utc)
+
+    return send_errors
 
 
 def monitor_articles(app_root: AppRoot, params: Params, conn: ZODB.Connection.Connection) -> dict[str, Exception]:
@@ -377,15 +395,15 @@ def monitor_articles(app_root: AppRoot, params: Params, conn: ZODB.Connection.Co
             })
 
             # filter products with changed SPP
-            products_spp_changed = [x for x in products if 'discount_client' in x.old_values]  # SPP changed
+            products_spp_changed = [x for x in products if 'discount_client' in x.old_values]
             if products_spp_changed:
-                # there are products with changed SPP, create report text
-                send_failures = send_spp_changes_report(params.contacts_users, products_spp_changed)
+                # there are products with changed SPP, send report to users
+                send_failures = send_spp_changes_report(app_root, params.contacts_users, products_spp_changed)
                 failures.update({
                     f'send to {k}': v for k, v in send_failures.items()
                 })
 
-                if len(send_failures) == len(params.contacts_users):
+                if all(x in send_failures for x in params.contacts_users):
                     # failed to send a report to at least one user, raise an exception to rollback database changes
                     raise SilentlyRollbackTransaction()
 
@@ -395,26 +413,40 @@ def monitor_articles(app_root: AppRoot, params: Params, conn: ZODB.Connection.Co
     return failures
 
 
-def send_admin_report(params: Params, failures: dict[str, Exception]):
+def send_admin_report(app_root: AppRoot, params: Params, failures: dict[str, Exception]):
     """
     Send error report to all configured admin contacts.
+    Conforms and updates ``app_root.entity_descr_to_report_sent_at`` index.
     If it was not possible to send a report to at least one admin contact, raises an exception.
     In case of some admin contacts failed, sends additional error report about that to other admin contacts.
     """
     def _send_failures_to_admins(header: str, failures_: dict[str, Exception]) -> dict[str, Exception]:
+        # filter out failures for whose report was recently sent
+        idx = app_root.entity_descr_to_report_sent_at
+        dt_past = datetime.now(timezone.utc) - timedelta(minutes=settings.report_errors_delay_interval)
+        failures_ = {k: v for k, v in failures_.items() if k not in idx or idx[k] < dt_past}
+        if not failures_:
+            return {}
+
         report_text = '\n'.join([f'<b>{header}</b>', '↓'] + [
             f'• {html.escape(k)}: {html.escape(str(v))}' for k, v in failures_.items()
         ] + [''])
 
+        log.info(f'send errors report to admins')
         send_failures_ = send_to_telegram_multiple(settings.telegram_bot_token, params.contacts_admins, report_text)
-        if len(send_failures_) == len(params.contacts_admins):
+        if all(x in send_failures_ for x in params.contacts_admins):
             raise RuntimeError(f'failed to send error report to any of configured admin contacts')
+
+        # report was sent to at least one recipient, save the current date/time in the index
+        for k in failures_:
+            idx[k] = datetime.now(timezone.utc)
 
         return send_failures_
 
     send_failures = _send_failures_to_admins('Failures', failures)
     if send_failures:
-        _send_failures_to_admins('Cannot send error report to the following contacts', send_failures)
+        failures = {f'send to {k}': v for k, v in send_failures.items()}
+        _send_failures_to_admins('Cannot send error report to the following contacts', failures)
 
 
 def main():
@@ -441,8 +473,8 @@ def main():
         failures = monitor_articles(app_root, params, conn)
 
         if failures:
-            log.info(f'sending errors report to admins')
-            send_admin_report(params, failures)
+            with in_transaction(conn):
+                send_admin_report(app_root, params, failures)
 
 
 if __name__ == '__main__':
