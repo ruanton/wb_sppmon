@@ -3,6 +3,7 @@ Interface to Wildberries website
 """
 
 import logging
+import math
 from decimal import Decimal
 from datetime import datetime, timezone
 
@@ -30,8 +31,16 @@ URL_WB_FILTERS = (
 )
 """Returns the available filters including a list of subcategories for a given category subfilter"""
 
+URL_WB_PRODUCTS = (
+    'https://catalog.wb.ru/catalog/{shard}/catalog?'  # category shard as got from Wildberries
+    'appType=1&curr=rub&dest=-1257786&regions=80,38,83,4,64,33,68,70,30,40,86,75,69,1,66,110,22,48,31,71,114'
+)
+"""Returns list of products by given filters, such as: cat=8988, page=20, priceU=60000;90000, sort=popular, etc."""
+
 SUBCATEGORY_FILTER_NAME = 'Категория';  """Name of filtering by subcategory"""
-SUBCATEGORY_FILTER_KEY = 'xsubject';    """Key for URL query for this filtering"""
+SUBCATEGORY_FILTER_KEY = 'xsubject';    """Key for URL query for filtering by subcategory"""
+
+UNREAL_BIG_PRICE = Decimal('999999999')
 
 
 class WildberriesWebsiteError(Exception):
@@ -50,7 +59,33 @@ class SeveralProductsFound(WildberriesWebsiteError):
     """Several products returned when one was expected"""
 
 
-def fetch_product_details(article: str) -> tuple[datetime, dict[str, str | Decimal]]:
+def parse_json_with_products(json_resp: dict, single_expected=False, article_expected: str = None) -> dict:
+    """
+    Parse json got from Wildberries.
+    @return: json part with product list
+    """
+    json_resp_repr = f'json response:\n{helpers.json_dumps(json_resp)}'
+    if 'data' not in json_resp:
+        raise UnexpectedResponse(f'no "data" in {json_resp_repr}')
+    if 'products' not in json_resp['data']:
+        raise UnexpectedResponse(f'no "data->products" in {json_resp_repr}')
+    json_products = json_resp['data']['products']
+
+    if single_expected or article_expected:
+        if not json_products:
+            raise NoProductsFound(f'no products found, {json_resp_repr}')
+        if len(json_products) > 1:
+            raise SeveralProductsFound(f'got several products, {json_resp_repr}')
+
+    if article_expected:
+        art_from_wb = str(json_products[0]['id'])
+        if art_from_wb != str(article_expected):
+            raise UnexpectedResponse(f'got different article: {art_from_wb} != {article_expected}, {json_resp_repr}')
+
+    return json_products
+
+
+def fetch_product_details(article: str) -> tuple[datetime, dict[str, int | str | Decimal]]:
     """
     Fetch some product details from the Wildberries website by article.
     @param article: product article
@@ -63,39 +98,93 @@ def fetch_product_details(article: str) -> tuple[datetime, dict[str, str | Decim
         resp = helpers.http_get(url)
         if not resp.content:
             raise UnexpectedResponse('no content')
-        json_resp = resp.json()
-        json_resp_repr = f'json response:\n{helpers.json_dumps(json_resp)}'
 
-        # parse json response
-        if 'data' not in json_resp:
-            raise UnexpectedResponse(f'no "data" in {json_resp_repr}')
-        if 'products' not in json_resp['data']:
-            raise UnexpectedResponse(f'no "data->products" in {json_resp_repr}')
-        json_products = json_resp['data']['products']
-        if not json_products:
-            raise NoProductsFound(f'no products found, {json_resp_repr}')
-        if len(json_products) > 1:
-            raise SeveralProductsFound(f'got several products, {json_resp_repr}')
+        json_resp = resp.json()
+        json_products = parse_json_with_products(json_resp, article_expected=article)
         json_product = json_products[0]
         if 'extended' not in json_product:
-            raise UnexpectedResponse(f'no "data->products[0]->extended" in {json_resp_repr}')
-        article_from_wb = str(json_product['id'])
-        if article_from_wb != article:
-            raise UnexpectedResponse(f'got different article: {article_from_wb} != {article}, {json_resp_repr}')
+            raise UnexpectedResponse(f'no "extended" in json product:\n{helpers.json_dumps(json_product)}')
 
-        return (
-            fetch_started_at,
-            {
-                'name': json_product['name'],
-                'price': Decimal(str(int(json_product['priceU']) / 100.0)),
-                'price_sale': Decimal(str(int(json_product['salePriceU']) / 100.0)),
-                'discount_base': Decimal(str(int(json_product['extended']['basicSale']))),
-                'discount_client': Decimal(str(int(json_product['extended']['clientSale']))),
-            }
-        )
+        product_properties = {
+            'name': json_product['name'],
+            'price': Decimal(str(int(json_product['priceU']) / 100.0)),
+            'price_sale': Decimal(str(int(json_product['salePriceU']) / 100.0)),
+            'discount_base': Decimal(str(int(json_product['extended']['basicSale']))),
+            'discount_client': Decimal(str(int(json_product['extended']['clientSale']))),
+        }
+        return fetch_started_at, product_properties
 
     except Exception as e:
         raise WildberriesWebsiteError(f'cannot fetch product details for article {article}: {e}') from e
+
+
+def fetch_products(
+        shard: str, cat_id: int, xsubject: int = None,
+        page=1, num_pages: int = None,
+        price_from: Decimal = None, price_to: Decimal = None,
+        sort: str = 'popular', **filters
+) -> tuple[datetime, list[dict[str, int | str | Decimal]]]:
+    """
+    Fetch products details from the Wildberries website by the given filters.
+    @param shard: category shard as got from Wildberries
+    @param cat_id: category ID
+    @param xsubject: subcategory ID
+    @param page: starting page number
+    @param num_pages: how many pages to fetch
+    @param price_from: filter by minimum price
+    @param price_to: filter by maximum price
+    @param sort: sort order
+    @param filters: optional additional filters
+    @return: date/time the fetching started, list of dictionaries of the products properties
+    """
+    try:
+        # convert arguments, except 'page', to filters
+        if price_from or price_to:
+            price_from_filter = int((price_from or Decimal(0))*100)
+            price_to_filter = math.ceil((price_to or UNREAL_BIG_PRICE)*100)
+            filters['priceU'] = f'{price_from_filter};{price_to_filter}'
+        if sort:
+            filters['sort'] = sort
+        if xsubject:
+            filters['xsubject'] = xsubject
+
+        fetch_started_at = datetime.now(tz=timezone.utc)
+        products_details = []
+        if num_pages:
+            # use recursion to fetch page by page
+            if 'num_pages' in filters:
+                del filters['num_pages']  # prevent infinite loop can be caused by incorrect call
+            for p in range(page, page + num_pages):
+                _, products_details_in_page = fetch_products(shard=shard, cat_id=cat_id, page=p, **filters)
+                if products_details_in_page:
+                    products_details += products_details_in_page
+                else:
+                    break
+            return fetch_started_at, products_details
+
+        # if called without num_pages, continue
+
+        url = URL_WB_PRODUCTS.format(shard=shard)
+        log.debug(f'fetch products details from "{url}" + filters, and parse response')
+        resp = helpers.http_get(url, params=filters)
+        if not resp.content:
+            raise UnexpectedResponse('no content')
+        json_resp = resp.json()
+        json_products = parse_json_with_products(json_resp)
+
+        products_properties = []
+        for json_product in json_products:
+            products_properties.append({
+                'id': json_product['id'],
+                'name': json_product['name'],
+                'price': Decimal(str(int(json_product['priceU']) / 100.0)),
+                'price_sale': Decimal(str(int(json_product['salePriceU']) / 100.0)),
+            })
+
+        return fetch_started_at, products_properties
+
+    except Exception as e:
+        raise WildberriesWebsiteError(f'cannot fetch products details: {e}') from e
 
 
 def fetch_categories() -> tuple[datetime, list[dict[str, int | str | bool]]]:

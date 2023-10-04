@@ -15,11 +15,12 @@ from BTrees.OOBTree import OOBTree
 from BTrees.IOBTree import IOBTree
 
 # local imports
-from .params import Params
+from .params import Params, ProductSubcategoryParams
 from .settings import settings
 from .idx_utils import idx_update
 from .telegram import send_to_telegram_multiple
-from .wildberries import UnexpectedResponse, fetch_product_details, fetch_categories, fetch_subcategories
+from .wildberries import fetch_product_details, fetch_categories, fetch_subcategories
+from .wildberries import UnexpectedResponse
 from .models import AppRoot, get_app_root
 from .models.tcm import in_transaction
 from .models.wb import LastUpdateResult, Product, Category, Subcategory
@@ -449,6 +450,58 @@ def send_admin_report(app_root: AppRoot, params: Params, failures: dict[str, Exc
         _send_failures_to_admins('Cannot send error report to the following contacts', failures)
 
 
+def find_input_scats(app_root: AppRoot, params: Params) -> tuple[set[Subcategory], dict[str, Exception]]:
+    """
+    Search for all subcategories given in input parameters.
+    If any of searches gives empty result, tries to update categories
+    and relevant subcategories from Wildberries and retries search.
+    @param app_root: App Root persistent object
+    @param params: input parameters
+    @return: set of matched subcategories, dict 'entity descriptor' => Exception, for failed searches
+    """
+    failures = {}
+    scats_matched_union: set[Subcategory] = set()
+    scats_params_no_matches: list[ProductSubcategoryParams] = []
+
+    def _find_scats():
+        for params_ in params.monitor_subcategories:
+            try:
+                scats_matched_ = find_subcategories(app_root, params_.category_search, params_.subcategory_search)
+                if not scats_matched_:
+                    scats_params_no_matches.append(params_)
+                    raise RuntimeError(f'no subcategories found')
+                elif len(scats_matched_) > settings.max_matched_subcategories:
+                    raise RuntimeError(
+                        f'found {len(scats_matched_)} subcategories, '
+                        f'it is more then configured maximum of {settings.max_matched_subcategories}'
+                    )
+                scats_matched_union.update(scats_matched_)
+            except Exception as e:
+                failures[f'{params_.category_search or "(any)"} → {params_.subcategory_search}'] = e
+
+    _find_scats()
+    if scats_params_no_matches:
+        # try to fetch categories and relevant subcategories from Wildberries
+        cat_names = {x.category_search for x in scats_params_no_matches if x}
+        if cat_names:
+            log.info('fetching product categories from Wildberries')
+            update_product_categories(app_root)
+            cats_relevant = set()
+            for cat_name in cat_names:
+                cats = find_categories(app_root, cat_name)
+                cats_relevant.update(cats)
+            for cat in cats_relevant:
+                log.info(f'fetching subcategories in category "{cat.name}" from Wildberries')
+                update_subcategories(app_root, cat)
+
+            # repeat search
+            failures = {}
+            scats_matched_union: set[Subcategory] = set()
+            _find_scats()
+
+    return scats_matched_union, failures
+
+
 def main():
     parser = argparse.ArgumentParser(description='Wildberries SPP Monitor.')
     parser.add_argument('config_uri', help='The URI to the main configuration file.')
@@ -471,6 +524,12 @@ def main():
 
         log.info('try to fetch product updates for all configured articles')
         failures = monitor_articles(app_root, params, conn)
+
+        log.info('try to find all subcategories matched to configured')
+        with in_transaction(conn):
+            subcategories, scats_failures = find_input_scats(app_root, params)
+        log.info(f'found {len(subcategories)} subcategories')
+        failures.update(scats_failures)
 
         if failures:
             with in_transaction(conn):
