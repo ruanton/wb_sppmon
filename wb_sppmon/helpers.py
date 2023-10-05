@@ -61,7 +61,7 @@ def http_request(method: str, url: str, retries: int = None, base_retry_pause: f
                 raise
 
         if base_retry_pause > 0:
-            time.sleep(random.uniform(base_retry_pause / 2.0, base_retry_pause))
+            time.sleep(random.uniform(float(base_retry_pause / 2.0), float(base_retry_pause)))
 
         retries -= 1
 

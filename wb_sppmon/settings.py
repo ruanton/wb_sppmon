@@ -4,6 +4,7 @@ Access to global application settings from the ini-file
 
 import inspect
 import pyramid.config
+import decimal
 
 
 class Settings:
@@ -27,16 +28,16 @@ class Settings:
         except Exception as e:
             raise ValueError(f'invalid or misconfigured integer parameter "{param_key}": {e}')
 
-    def _get_float_param(self) -> float:
+    def _get_decimal_param(self) -> decimal.Decimal:
         param_key = inspect.currentframe().f_back.f_code.co_name  # the calling function name
         if not self._settings_dict:
             raise RuntimeError(f'_settings_dict is not initialized yet')
 
         try:
-            value = float(self._settings_dict[param_key])
+            value = decimal.Decimal(str(self._settings_dict[param_key]))
             return value
         except Exception as e:
-            raise ValueError(f'invalid or misconfigured float parameter "{param_key}": {e}')
+            raise ValueError(f'invalid or misconfigured decimal parameter "{param_key}": {e}')
 
     def _get_str_param(self) -> str:
         param_key = inspect.currentframe().f_back.f_code.co_name  # the calling function name
@@ -105,9 +106,9 @@ class Settings:
         return self._get_int_param()
 
     @property
-    def http_base_retry_pause(self) -> float:
+    def http_base_retry_pause(self) -> decimal.Decimal:
         """Default base of random pause between retries of failed HTTP requests"""
-        return self._get_float_param()
+        return self._get_decimal_param()
 
     @property
     def products_num_pages_to_fetch(self) -> int:
@@ -120,14 +121,14 @@ class Settings:
         return self._get_int_param()
 
     @property
-    def products_num_percent_min_determine_spp(self) -> float:
+    def products_num_percent_min_determine_spp(self) -> decimal.Decimal:
         """Minimum percentage of products with the same SPP to reliable determination of SPP"""
-        return self._get_float_param()
+        return self._get_decimal_param()
 
     @property
-    def maximum_total_discount_base(self) -> float:
+    def maximum_total_discount_base(self) -> decimal.Decimal:
         """Maximal total discount to start from"""
-        return self._get_float_param()
+        return self._get_decimal_param()
 
 
 settings = Settings()
