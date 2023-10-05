@@ -51,50 +51,82 @@ class Settings:
 
     @property
     def contacts_admins_file(self) -> str:
+        """File with contacts of administrators where to send script errors"""
         return self._get_str_param()
 
     @property
     def contacts_users_file(self) -> str:
+        """File with contacts of users where to send reports"""
         return self._get_str_param()
 
     @property
     def telegram_bot_token(self) -> str:
+        """Telegram bot API token"""
         return self._get_str_param()
 
     @property
     def report_errors_delay_interval(self) -> int:
+        """Report errors for the same entity no more often than one per this number of minutes"""
         return self._get_int_param()
 
     @property
     def report_changes_delay_interval(self) -> int:
+        """Report changes for the same entity no more often than one per this number of minutes"""
         return self._get_int_param()
 
     @property
     def monitor_articles_file(self) -> str:
+        """File with WB article numbers to monitor"""
         return self._get_str_param()
 
     @property
     def monitor_subcategories_file(self) -> str:
+        """File with WB product categories to monitor"""
         return self._get_str_param()
 
     @property
     def max_matched_subcategories(self) -> int:
+        """If matched more subcategories for any input category, reject all those subcategories"""
         return self._get_int_param()
 
     @property
     def search_min_chars(self) -> int:
+        """Minimum number of characters suitable for imprecise text searching"""
         return self._get_int_param()
 
     @property
     def search_max_suffix(self) -> int:
+        """Maximum length of non-matching suffix"""
         return self._get_int_param()
 
     @property
     def http_retries(self) -> int:
+        """Default number of HTTP request retries"""
         return self._get_int_param()
 
     @property
     def http_base_retry_pause(self) -> float:
+        """Default base of random pause between retries of failed HTTP requests"""
+        return self._get_float_param()
+
+    @property
+    def products_num_pages_to_fetch(self) -> int:
+        """Number of product listing pages to fetch for each search criterion"""
+        return self._get_int_param()
+
+    @property
+    def products_num_to_determine_spp(self) -> int:
+        """Minimum number of products for reliable determination of SPP"""
+        return self._get_int_param()
+
+    @property
+    def products_num_percent_min_determine_spp(self) -> float:
+        """Minimum percentage of products with the same SPP to reliable determination of SPP"""
+        return self._get_float_param()
+
+    @property
+    def maximum_total_discount_base(self) -> float:
+        """Maximal total discount to start from"""
         return self._get_float_param()
 
 

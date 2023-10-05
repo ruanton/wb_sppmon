@@ -44,6 +44,18 @@ http_retries = 3
 # default base of random pause between retries of failed HTTP requests
 http_base_retry_pause = 0.5
 
+# number of product listing pages to fetch for each search criterion
+products_num_pages_to_fetch = 2
+
+# minimum number of products for reliable determination of SPP
+products_num_to_determine_spp = 12
+
+# minimum percentage of products with the same SPP to reliable determination of SPP
+products_num_percent_min_determine_spp = 75
+
+# maximal total discount to start from
+maximum_total_discount_base = 90
+
 
 ###
 # logging configuration
