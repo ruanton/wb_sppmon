@@ -350,12 +350,13 @@ def find_subcategories(app_root: AppRoot, s_cat: str | int, s_scat: str | int) -
     return _find_subcategories_in_container(app_root, s_scat)
 
 
-def send_spp_changes(app_root: AppRoot, contacts: list[str], products: list[Product], failures: list[Failure]) -> bool:
+def send_spp_changes(
+        app_root: AppRoot, contacts: list[str], entities: list[Product | PriceSlot], failures: list[Failure]) -> bool:
     """
-    Send report about SPP changes for all given products.
+    Send report about SPP changes for all given products or price slots.
     Conforms and updates ``app_root.entity_descr_to_report_sent_at`` index.
     @param app_root: App Root persistent object
-    @param products: list of products with SPP change
+    @param entities: list of products or price slots with SPP change
     @param contacts: contacts for sending a report
     @param failures: output param, filled with send failures
     @return: True — report was sent to at least one contact
@@ -363,26 +364,33 @@ def send_spp_changes(app_root: AppRoot, contacts: list[str], products: list[Prod
     # filter out products for whose report was recently sent
     idx = app_root.entity_descr_to_report_sent_at
     dt_past = datetime.now(timezone.utc) - timedelta(minutes=settings.report_changes_delay_interval)
-    products = [x for x in products if x.article_descriptor not in idx or idx[x.article_descriptor] < dt_past]
-    if not products:
-        # all SPP changes for given products has been recently reported, do not send a report
+    entities = [x for x in entities if x.entity_descriptor not in idx or idx[x.entity_descriptor] < dt_past]
+    if not entities:
+        # all SPP changes for given entities has been recently reported, do not send a report
         return False
 
     report_lines = ['<b>Изменения СПП</b>', '↓']
-    for p in products:
-        report_lines.append(
-            f'{dt_fmt(p.fetched_at)}: "{html.escape(p.name)}", арт. {html.escape(p.article)}, цена {p.price}, '
-            f'со скидкой {p.price_sale}, СПП <b>{p.discount_client}</b>'
-        )
-        descr_was = f'{dt_fmt(p.old_values["fetched_at"])} было: СПП <b>{p.old_values["discount_client"]}</b>'
-        if 'name' in p.old_values:
-            descr_was += f', название "{html.escape(p.old_values["name"])}"'
-        if 'price' in p.old_values:
-            descr_was += f', цена {p.old_values["price"]}'
-        if 'price_sale' in p.old_values:
-            descr_was += f', цена со скидкой {p.old_values["price_sale"]}'
-        report_lines.append(descr_was)
-        report_lines.append('')
+    for e in entities:
+        if isinstance(e, Product):
+            report_lines.append(
+                f'{dt_fmt(e.fetched_at)}: {html.escape(e.name)}, арт. {html.escape(e.article)}, цена {e.price}, '
+                f'со скидкой {e.price_sale}, СПП <b>{e.discount_client}</b>'
+            )
+            descr_was = f'{dt_fmt(e.old_values["fetched_at"])} было: СПП <b>{e.old_values["discount_client"]}</b>'
+            if 'name' in e.old_values:
+                descr_was += f', название "{html.escape(e.old_values["name"])}"'
+            if 'price' in e.old_values:
+                descr_was += f', цена {e.old_values["price"]}'
+            if 'price_sale' in e.old_values:
+                descr_was += f', цена со скидкой {e.old_values["price_sale"]}'
+            report_lines.append(descr_was)
+            report_lines.append('')
+        else:  # PriceSlot
+            report_lines.append(
+                f'{dt_fmt(e.fetched_at)}: {html.escape(e.entity_descriptor)}: СПП <b>{e.discount_client}</b>\n'
+                f'{dt_fmt(e.old_values["fetched_at"])}: было СПП <b>{e.old_values["discount_client"]}</b>'
+            )
+            report_lines.append('')
 
     report_text = '\n'.join(report_lines)
     log.info(f'send changes report to users')
@@ -393,8 +401,8 @@ def send_spp_changes(app_root: AppRoot, contacts: list[str], products: list[Prod
 
     if any(x not in send_errors for x in contacts):
         # report was sent to at least one recipient, save the current date/time in the index
-        for p in products:
-            idx[p.article_descriptor] = datetime.now(timezone.utc)
+        for e in entities:
+            idx[e.entity_descriptor] = datetime.now(timezone.utc)
         return True
 
     # report was failed to send
@@ -600,6 +608,93 @@ def fill_slots_with_articles(slots: list[list[PriceSlot]]) -> None:
             price_to = price_from
 
 
+def determine_spp_in_slots(slots: list[list[PriceSlot]], failures: list[Failure]) -> list[PriceSlot]:
+    """
+    Fetches product details for required number of articles and saves SPP
+    @param slots: price slots grouped by subcategory filled with articles
+    @param failures: output param, filled with failures if any
+    @return: list of price slots with SPP changed
+    """
+    slots_with_changed_spp: list[PriceSlot] = []
+
+    def validate_enough_products(num: int) -> bool:
+        if num >= settings.products_num_to_determine_spp:
+            return True
+        failures.append(Failure(slot.entity_descriptor, f'not enough products to reliably determine SPP: {num}'))
+        return False
+
+    def calc_and_save_spp(slot_: PriceSlot, spp_to_num: dict) -> bool:
+        max_num = max(x for x in spp_to_num.values())
+        percent = Decimal(max_num) / settings.products_num_to_determine_spp * 100
+        if percent < settings.products_num_percent_min_determine_spp:
+            failures.append(Failure(slot.entity_descriptor, f'not large enough percent to determine SPP: {percent}'))
+            return False
+        else:
+            spp_ = [x for x, v in spp_to_num.items() if v == max_num][0]
+            return slot_.update(datetime.now(tz=timezone.utc), discount_client=spp_)
+
+    for slots_in_scat in slots:
+        for slot in slots_in_scat:
+            if not validate_enough_products(len(slot.articles)):
+                continue
+            log.info(f'fetching product details for articles in slot {slot.entity_descriptor}')
+            spp_to_num_products = {}
+            total_spp_in_slot = 0
+            for article in slot.articles:
+                try:
+                    _, product_props = fetch_product_details(article)
+                    spp = product_props['discount_client']
+                    total_spp_in_slot += 1
+                    if spp in spp_to_num_products:
+                        spp_to_num_products[spp] += 1
+                    else:
+                        spp_to_num_products[spp] = 1
+                    if total_spp_in_slot >= settings.products_num_to_determine_spp:
+                        break
+                except Exception as e:
+                    log.warning(f'fetch error: {e}')
+            if not validate_enough_products(total_spp_in_slot):
+                continue
+            if calc_and_save_spp(slot, spp_to_num_products) and slot.old_values['discount_client'] is not None:
+                slots_with_changed_spp.append(slot)
+
+    return slots_with_changed_spp
+
+
+def monitor_slots(app_root: AppRoot, params: Params, conn: Connection, failures: list[Failure]) -> None:
+    """
+    Determine SPP updates and send report to all users in case of SPP change. Does all in a new transaction.
+    If any SPP changed, and it was not possible to send a report to at least one contact, rollbacks transaction.
+    @param app_root: App Root persistent object
+    @param params: input params object
+    @param conn: database connection
+    @param failures: output param, filled with failures if any
+    """
+    class SilentlyRollbackTransaction(Exception):
+        pass
+
+    try:
+        with in_transaction(conn):
+            log.info('try to find all subcategories matched to configured')
+            slots = get_or_create_all_slots(app_root, params, failures)
+            log.info(f'found {len(slots)} subcategories')
+
+            log.info('fetch articles and fill price slots')
+            fill_slots_with_articles(slots)
+
+            log.info('determine SPP in all prepared price slots')
+            slots_with_changed_spp = determine_spp_in_slots(slots, failures)
+
+            if slots_with_changed_spp:
+                # there are slots with changed SPP, send report to users
+                if not send_spp_changes(app_root, params.contacts_users, slots_with_changed_spp, failures):
+                    # failed to send a report to at least one user, raise an exception to rollback database changes
+                    raise SilentlyRollbackTransaction()
+
+    except SilentlyRollbackTransaction:
+        pass
+
+
 def main():
     parser = argparse.ArgumentParser(description='Wildberries SPP Monitor.')
     parser.add_argument('config_uri', help='The URI to the main configuration file.')
@@ -636,13 +731,8 @@ def main():
         log.info('try to fetch product updates for all configured articles')
         monitor_articles(app_root, params, conn, failures)
 
-        log.info('try to find all subcategories matched to configured')
-        with in_transaction(conn):
-            slots = get_or_create_all_slots(app_root, params, failures)
-        log.info(f'found {len(slots)} subcategories')
-
-        log.info('fetch articles and fill price slots')
-        fill_slots_with_articles(slots)
+        log.info('try to determine SPPs for all configured subcategories and price ranges')
+        monitor_slots(app_root, params, conn, failures)
 
         if failures:
             with in_transaction(conn):

@@ -80,6 +80,11 @@ class Product(FetchedEntity):
         """Human-readable article descriptor"""
         return self.fmt_article_descriptor(self.article)
 
+    @property
+    def entity_descriptor(self) -> str:
+        """Human-readable product descriptor"""
+        return self.fmt_article_descriptor(self.article)
+
 
 class Subcategory(FetchedEntity):
     """Wildberries product subcategory"""
@@ -189,7 +194,7 @@ class PriceSlot(FetchedEntity):
         self.subcategory = subcategory
         self.price_from = price_from
         self.price_to = price_to
-        self.client_discount: Decimal | None = None
+        self.discount_client: Decimal | None = None
         self._v_articles: set[str] = set();  """product articles, not persist"""
 
     @property
@@ -198,3 +203,8 @@ class PriceSlot(FetchedEntity):
         if not hasattr(self, '_v_articles') or self._v_articles is None:
             self._v_articles: set[str] = set()
         return self._v_articles
+
+    @property
+    def entity_descriptor(self) -> str:
+        """Human-readable price slot descriptor"""
+        return f'{self.subcategory.entity_descriptor} → {self.price_from} → {self.price_to}'
