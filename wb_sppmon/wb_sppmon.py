@@ -3,7 +3,7 @@ import logging
 import argparse
 import typing
 import html
-import ZODB.Connection
+from ZODB.Connection import Connection
 from datetime import datetime, timezone, timedelta
 from pyramid.paster import bootstrap, setup_logging
 from pyramid.request import Request
@@ -18,6 +18,7 @@ from BTrees.IOBTree import IOBTree
 from .params import Params, ProductSubcategoryParams
 from .settings import settings
 from .idx_utils import idx_update
+from .failure import Failure
 from .telegram import send_to_telegram_multiple
 from .wildberries import fetch_product_details, fetch_categories, fetch_subcategories
 from .wildberries import UnexpectedResponse
@@ -29,26 +30,21 @@ log = logging.getLogger(__name__)
 
 
 def dt_fmt(dt: datetime) -> str:
-    """Format date/time in local timezone, minutes precision"""
+    """Format date/time with minutes precision in local timezone"""
     return f'{dt.astimezone():%Y-%m-%d %H:%M}'
 
 
-def fetch_product_updates(app_root: AppRoot, articles: list[str]) -> tuple[list[Product], int, dict[str, Exception]]:
+def fetch_product_updates(app_root: AppRoot, articles: list[str], failures: list[Failure]) -> list[Product]:
     """
-    Try to fetch product details for given product articles. Returns updated products only.
-    Every returned Product entity have old_values volatile property with previous fields.
+    Try to fetch product details for given product articles.
+    New products can be distinguished by the old_values == None.
+    Updated Product entities have old_values volatile property with fields with previous values if any.
     @param app_root: App Root persistent object
     @param articles: list of articles
-    @return: (
-      • list of updated Product entities,
-      • number of new products,
-      • mapping: article => exception, for all articles failed to fetch
-    )
+    @param failures: output param, filled with failed fetches if any
+    @return: a list of all new and updated Product entities
     """
-    updated_products: list[Product] = []
-    article_to_exception: dict[str, Exception] = {}
-
-    new_products_num = 0
+    products: list[Product] = []
     for article in articles:
         try:
             fetch_started_at, product_details = fetch_product_details(article)
@@ -56,18 +52,20 @@ def fetch_product_updates(app_root: AppRoot, articles: list[str]) -> tuple[list[
             if article in app_root.article_to_product:
                 # get entity from database
                 product = app_root.article_to_product[article]
-                if product.update(fetch_started_at, **product_details):
-                    updated_products.append(product)
+                product.update(fetch_started_at, **product_details)
             else:
                 # create new entity
                 product = Product(article=article, **product_details, fetched_at=fetch_started_at)
                 app_root.article_to_product[article] = product
-                new_products_num += 1
+
+            products.append(product)
 
         except Exception as e:
-            article_to_exception[article] = e
+            failures.append(Failure(
+                Product.fmt_article_descriptor(article), e
+            ))
 
-    return updated_products, new_products_num, article_to_exception
+    return products
 
 
 def update_product_categories(app_root: AppRoot) -> None:
@@ -75,7 +73,7 @@ def update_product_categories(app_root: AppRoot) -> None:
     Fetch all product categories from the Wildberries website.
     Updates database: creates new categories, updates existing, does not delete disappearing ones.
     Updates lw_name_to_category and lw_seo_to_category mappings.
-    Raises exception on fetch or parse error.
+    Raises an exception if there is a fetch or parse error.
     @param app_root: App Root persistent object
     """
     fetch_started_at, product_categories_list = fetch_categories()
@@ -127,13 +125,13 @@ def update_product_categories(app_root: AppRoot) -> None:
     )
 
 
-def update_subcategories(app_root: AppRoot, category: Category):
+def update_subcategories(app_root: AppRoot, category: Category) -> None:
     """
     Fetch all subcategories for the given product category.
     Updates category entity: creates new subcategories, updates existing, but does not delete disappearing ones.
     Updates category.lw_name_to_subcategory mapping.
     Updates app_root.lw_name_to_subcategory and app_root.id_to_subcategory mappings.
-    Raises exception on fetch or parse error.
+    Raises an exception if there is a fetch or parse error.
     @param app_root: App Root persistent object
     @param category: Product category entity to update its subcategories
     """
@@ -196,31 +194,42 @@ def update_subcategories(app_root: AppRoot, category: Category):
     )
 
 
-def update_all_categories_and_subcategories(app_root: AppRoot, conn: ZODB.Connection.Connection):
+def update_all_categories_and_subcategories(app_root: AppRoot, conn: Connection, failures: list[Failure]) -> None:
+    """
+    Fetch from Wildberries and update all categories and subcategories.
+    @param app_root: App Root persistent object
+    @param conn: database connection
+    @param failures: output param, filled with failures if any
+    """
     log.info('fetch, parse and save to database all product categories')
     with in_transaction(conn):
-        update_product_categories(app_root)
+        try:
+            update_product_categories(app_root)
+        except Exception as e:
+            log.warning(f'failed to update categories: {e}')
+            failures.append(Failure('update categories', e))
 
     lur = app_root.categories_last_update
     log.info(f'=== categories added: {lur.num_new}, updated: {lur.num_updated}, disappeared: {lur.num_gone}')
 
     log.info('update subcategories for all product categories')
-    for c in app_root.id_to_category.values():
-        if not c.query or not c.shard:
+    for cat in app_root.id_to_category.values():
+        if not cat.query or not cat.shard:
             continue
-        # if cat.subcategories_last_update:
-        #     continue
-        log.info(f'trying to update subcategories for {c}')
+
+        log.info(f'trying to update subcategories for {cat}')
         try:
             with in_transaction(conn):
-                update_subcategories(app_root, c)
-            lur = c.subcategories_last_update
+                update_subcategories(app_root, cat)
+            lur = cat.subcategories_last_update
             log.info(f'=== scats added: {lur.num_new}, updated: {lur.num_updated}, disappeared: {lur.num_gone}')
+
         except Exception as e:
-            log.warning(f'error: {e}')
+            log.warning(f'failed to update subcategories in {cat.entity_descriptor}: {e}')
+            failures.append(Failure(f'update subcategories in {cat.entity_descriptor}', e))
 
 
-def dump_all_categories_and_subcategories(app_root: AppRoot):
+def dump_all_categories_and_subcategories(app_root: AppRoot) -> None:
     log.info('print all categories and subcategories from the database')
     print('Под;Кат;Подкатегория;Категория;Полное название категории;Род;Фильтр;URL;Обновлено')
     for c in app_root.id_to_category.values():
@@ -274,7 +283,9 @@ def find_categories(app_root: AppRoot, search: str | int) -> set[Category]:
         while len(search) >= settings.search_min_chars and chars_stripped <= settings.search_max_suffix:
             key_max = search + chr(sys.maxunicode)
             matched = get_matched_items(lw_name_to_cat.items(min=search, max=key_max), search)
-            matched.update(get_matched_items(lw_seo_to_cat.items(min=search, max=key_max), search))
+            matched.update(
+                get_matched_items(lw_seo_to_cat.items(min=search, max=key_max), search)
+            )
             if matched:
                 return matched
 
@@ -327,27 +338,34 @@ def find_subcategories(app_root: AppRoot, s_cat: str | int, s_scat: str | int) -
             return set()
 
     if s_cat:
+        # if we have concrete categories, search in them
         cats = find_categories(app_root, s_cat)
         scats = set()
         for cat in cats:
             scats.update(_find_subcategories_in_container(cat, s_scat))
         return scats
 
+    # else search by subcategory name or ID in global index
     return _find_subcategories_in_container(app_root, s_scat)
 
 
-def send_spp_changes_report(app_root: AppRoot, contacts: list[str], products: list[Product]) -> dict[str, Exception]:
+def send_spp_changes(app_root: AppRoot, contacts: list[str], products: list[Product], failures: list[Failure]) -> bool:
     """
     Send report about SPP changes for all given products.
     Conforms and updates ``app_root.entity_descr_to_report_sent_at`` index.
-    @return: contact => Exception, for all send failures.
+    @param app_root: App Root persistent object
+    @param products: list of products with SPP change
+    @param contacts: contacts for sending a report
+    @param failures: output param, filled with send failures
+    @return: True — report was sent to at least one contact
     """
     # filter out products for whose report was recently sent
     idx = app_root.entity_descr_to_report_sent_at
     dt_past = datetime.now(timezone.utc) - timedelta(minutes=settings.report_changes_delay_interval)
-    products = [x for x in products if f'article:{x.article}' not in idx or idx[f'article:{x.article}'] < dt_past]
+    products = [x for x in products if x.article_descriptor not in idx or idx[x.article_descriptor] < dt_past]
     if not products:
-        return {}
+        # all SPP changes for given products has been recently reported, do not send a report
+        return False
 
     report_lines = ['<b>Изменения СПП</b>', '↓']
     for p in products:
@@ -369,137 +387,155 @@ def send_spp_changes_report(app_root: AppRoot, contacts: list[str], products: li
     log.info(f'send changes report to users')
     send_errors = send_to_telegram_multiple(settings.telegram_bot_token, contacts, report_text)
 
+    for contact, exception in send_errors.items():
+        failures.append(Failure(str(contact), f'failed to send report: {exception}'))
+
     if any(x not in send_errors for x in contacts):
         # report was sent to at least one recipient, save the current date/time in the index
         for p in products:
-            idx[f'article:{p.article}'] = datetime.now(timezone.utc)
+            idx[p.article_descriptor] = datetime.now(timezone.utc)
+        return True
 
-    return send_errors
+    # report was failed to send
+    return False
 
 
-def monitor_articles(app_root: AppRoot, params: Params, conn: ZODB.Connection.Connection) -> dict[str, Exception]:
+def monitor_articles(app_root: AppRoot, params: Params, conn: Connection, failures: list[Failure]) -> None:
     """
     Fetch product updates and send report to all users in case of SPP change. Does all in a new transaction.
     If any SPP changed, and it was not possible to send a report to at least one contact, rollbacks transaction.
-    @return: failed entity descriptor => Exception, for each failure
+    @param app_root: App Root persistent object
+    @param params: input params object
+    @param conn: database connection
+    @param failures: output param, filled with failures if any
     """
     class SilentlyRollbackTransaction(Exception):
         pass
 
-    failures = {}
     try:
         with in_transaction(conn):
-            products, new_products_num, article_failures = fetch_product_updates(app_root, params.monitor_articles)
-            log.info(f'fetched new: {new_products_num}, updated: {len(products)}, failed: {len(article_failures)}')
-            failures.update({
-                f'article:{k}': v for k, v in article_failures.items()
-            })
+            products = fetch_product_updates(app_root, params.monitor_articles, failures)
+            new_products_num = len([x for x in products if x.old_values is None])
+            log.info(f'products fetched new: {new_products_num}, updated: {len(products) - new_products_num}')
 
             # filter products with changed SPP
-            products_spp_changed = [x for x in products if 'discount_client' in x.old_values]
-            if products_spp_changed:
+            products = [x for x in products if x.old_values is not None and 'discount_client' in x.old_values]
+            if products:
                 # there are products with changed SPP, send report to users
-                send_failures = send_spp_changes_report(app_root, params.contacts_users, products_spp_changed)
-                failures.update({
-                    f'send to {k}': v for k, v in send_failures.items()
-                })
-
-                if all(x in send_failures for x in params.contacts_users):
+                if not send_spp_changes(app_root, params.contacts_users, products, failures):
                     # failed to send a report to at least one user, raise an exception to rollback database changes
                     raise SilentlyRollbackTransaction()
 
     except SilentlyRollbackTransaction:
         pass
 
-    return failures
 
-
-def send_admin_report(app_root: AppRoot, params: Params, failures: dict[str, Exception]):
+def send_admin_report(app_root: AppRoot, params: Params, failures: list[Failure]) -> None:
     """
     Send error report to all configured admin contacts.
     Conforms and updates ``app_root.entity_descr_to_report_sent_at`` index.
     If it was not possible to send a report to at least one admin contact, raises an exception.
     In case of some admin contacts failed, sends additional error report about that to other admin contacts.
+    @param app_root: App Root persistent object
+    @param params: input params object
+    @param failures: failures to report about
     """
-    def _send_failures_to_admins(header: str, failures_: dict[str, Exception]) -> dict[str, Exception]:
+    def _send_failures_to_admins(header: str, failures_: list[Failure]) -> dict[str, Exception]:
         # filter out failures for whose report was recently sent
         idx = app_root.entity_descr_to_report_sent_at
         dt_past = datetime.now(timezone.utc) - timedelta(minutes=settings.report_errors_delay_interval)
-        failures_ = {k: v for k, v in failures_.items() if k not in idx or idx[k] < dt_past}
+        failures_ = [x for x in failures_ if x.entity_descr not in idx or idx[x.entity_descr] < dt_past]
         if not failures_:
             return {}
 
-        report_text = '\n'.join([f'<b>{header}</b>', '↓'] + [
-            f'• {html.escape(k)}: {html.escape(str(v))}' for k, v in failures_.items()
-        ] + [''])
+        def _trunc(text: str) -> str:
+            return text if len(text) < 256 else f'{text[:250]} ...'
+
+        report_text = '\n'.join(
+            [f'<b>{header}</b>', '↓'] +
+            [f'• {html.escape(x.entity_descr)}: {html.escape(_trunc(x.message))}' for x in failures_] +
+            ['']
+        )
 
         log.info(f'send errors report to admins')
         send_failures_ = send_to_telegram_multiple(settings.telegram_bot_token, params.contacts_admins, report_text)
         if all(x in send_failures_ for x in params.contacts_admins):
-            raise RuntimeError(f'failed to send error report to any of configured admin contacts')
+            raise RuntimeError(f'failed to send error report to any of the configured admin contacts')
 
         # report was sent to at least one recipient, save the current date/time in the index
-        for k in failures_:
-            idx[k] = datetime.now(timezone.utc)
+        for x in failures_:
+            idx[x.entity_descr] = datetime.now(timezone.utc)
 
         return send_failures_
 
     send_failures = _send_failures_to_admins('Failures', failures)
     if send_failures:
-        failures = {f'send to {k}': v for k, v in send_failures.items()}
-        _send_failures_to_admins('Cannot send error report to the following contacts', failures)
+        _send_failures_to_admins(
+            'Failed to send error report to the following contacts',
+            [Failure(c, e) for c, e in send_failures.items()]
+        )
 
 
-def find_input_scats(app_root: AppRoot, params: Params) -> tuple[set[Subcategory], dict[str, Exception]]:
+def find_input_scats(app_root: AppRoot, params: Params, failures: list[Failure]) -> set[Subcategory]:
     """
     Search for all subcategories given in input parameters.
     If any of searches gives empty result, tries to update categories
     and relevant subcategories from Wildberries and retries search.
     @param app_root: App Root persistent object
     @param params: input parameters
-    @return: set of matched subcategories, dict 'entity descriptor' => Exception, for failed searches
+    @param failures: output param, filled with failures if any
+    @return: set of matched subcategories
     """
-    failures = {}
+    failures_: list[Failure] = [];  """Temporary list of failures in case of searching retry"""
     scats_matched_union: set[Subcategory] = set()
     scats_params_no_matches: list[ProductSubcategoryParams] = []
 
     def _find_scats():
-        for params_ in params.monitor_subcategories:
-            try:
-                scats_matched_ = find_subcategories(app_root, params_.category_search, params_.subcategory_search)
-                if not scats_matched_:
-                    scats_params_no_matches.append(params_)
-                    raise RuntimeError(f'no subcategories found')
-                elif len(scats_matched_) > settings.max_matched_subcategories:
-                    raise RuntimeError(
-                        f'found {len(scats_matched_)} subcategories, '
-                        f'it is more then configured maximum of {settings.max_matched_subcategories}'
-                    )
+        for s_params_ in params.monitor_subcategories:
+            scats_matched_ = find_subcategories(app_root, s_params_.category_search, s_params_.subcategory_search)
+            if not scats_matched_:
+                failures_.append(Failure(s_params_.scat_search_descriptor, 'no subcategories found'))
+                scats_params_no_matches.append(s_params_)
+            elif len(scats_matched_) > settings.max_matched_subcategories:
+                failures_.append(Failure(
+                    s_params_.scat_search_descriptor,
+                    f'found {len(scats_matched_)} subcategories, '
+                    f'it is more then configured maximum of {settings.max_matched_subcategories}'
+                ))
+            else:
                 scats_matched_union.update(scats_matched_)
-            except Exception as e:
-                failures[f'{params_.category_search or "(any)"} → {params_.subcategory_search}'] = e
 
     _find_scats()
     if scats_params_no_matches:
         # try to fetch categories and relevant subcategories from Wildberries
-        cat_names = {x.category_search for x in scats_params_no_matches if x}
-        if cat_names:
-            log.info('fetching product categories from Wildberries')
-            update_product_categories(app_root)
+        cat_names_to_search = {x.category_search for x in scats_params_no_matches if x.category_search}
+        if cat_names_to_search:
+            log.info('try to fetch product categories from Wildberries')
+            try:
+                update_product_categories(app_root)
+            except Exception as e:
+                log.warning(f'failed to update categories: {e}')
+                failures.append(Failure('update categories', e))
+
             cats_relevant = set()
-            for cat_name in cat_names:
+            for cat_name in cat_names_to_search:
                 cats = find_categories(app_root, cat_name)
                 cats_relevant.update(cats)
             for cat in cats_relevant:
                 log.info(f'fetching subcategories in category "{cat.name}" from Wildberries')
-                update_subcategories(app_root, cat)
+                try:
+                    update_subcategories(app_root, cat)
+                except Exception as e:
+                    log.warning(f'failed to update subcategories in {cat.entity_descriptor}: {e}')
+                    failures.append(Failure(f'update subcategories in {cat.entity_descriptor}', e))
 
             # repeat search
-            failures = {}
+            failures_: list[Failure] = []
             scats_matched_union: set[Subcategory] = set()
             _find_scats()
 
-    return scats_matched_union, failures
+    failures += failures_
+    return scats_matched_union
 
 
 def main():
@@ -519,17 +555,26 @@ def main():
         params = Params()
 
         log.info('get database connection and App Root object')
-        conn: ZODB.Connection.Connection = get_connection(request)
+        conn: Connection = get_connection(request)
         app_root = get_app_root(conn)
 
+        # the cumulative list of all failures to report to admins
+        failures: list[Failure] = []
+
+        update_all_categories_and_subcategories(app_root, conn, failures)
+        if failures:
+            log.warning("==== List of all failures in updating all categories ===")
+            for failure in failures:
+                log.warning(f'{failure.entity_descr} → {failure.message}')
+            failures.clear()
+
         log.info('try to fetch product updates for all configured articles')
-        failures = monitor_articles(app_root, params, conn)
+        monitor_articles(app_root, params, conn, failures)
 
         log.info('try to find all subcategories matched to configured')
         with in_transaction(conn):
-            subcategories, scats_failures = find_input_scats(app_root, params)
+            subcategories = find_input_scats(app_root, params, failures)  # TODO: must return list[Slots]
         log.info(f'found {len(subcategories)} subcategories')
-        failures.update(scats_failures)
 
         if failures:
             with in_transaction(conn):

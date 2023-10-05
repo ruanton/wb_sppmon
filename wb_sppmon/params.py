@@ -50,6 +50,11 @@ class ProductSubcategoryParams:
             f'{self.price_min}, {self.price_max}, {self.price_step}'
         )
 
+    @property
+    def scat_search_descriptor(self) -> str:
+        """Human-readable subcategory search params descriptor"""
+        return f'{self.category_search or "(any)"} → {self.subcategory_search}'
+
 
 class Params:
     """Input params"""

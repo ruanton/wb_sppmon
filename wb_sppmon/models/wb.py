@@ -70,6 +70,16 @@ class Product(FetchedEntity):
     def __str__(self):
         return f'{self.article}: {self.name}, {self.price}, sale: {self.price_sale}, spp: {self.discount_client}'
 
+    @staticmethod
+    def fmt_article_descriptor(article: str) -> str:
+        """Format human-readable article descriptor"""
+        return f'article:{article}'
+
+    @property
+    def article_descriptor(self) -> str:
+        """Human-readable article descriptor"""
+        return self.fmt_article_descriptor(self.article)
+
 
 class Subcategory(FetchedEntity):
     """Wildberries product subcategory"""
@@ -81,6 +91,11 @@ class Subcategory(FetchedEntity):
 
     def __str__(self):
         return f'{self.id}: {self.name}'
+
+    @property
+    def entity_descriptor(self) -> str:
+        """Human-readable subcategory descriptor"""
+        return f'{self.category.id}:{self.category.name} → {self.id}:{self.name}'
 
 
 class Category(FetchedEntity):
@@ -105,6 +120,11 @@ class Category(FetchedEntity):
 
     def __str__(self):
         return f'{self.id}: {self.name}'
+
+    @property
+    def entity_descriptor(self) -> str:
+        """Human-readable category descriptor"""
+        return f'{self.id}:{self.name}'
 
     @property
     def id_to_subcategory(self) -> dict[int, Subcategory]:
