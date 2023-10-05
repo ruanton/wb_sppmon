@@ -64,23 +64,23 @@ def parse_json_with_products(json_resp: dict, single_expected=False, article_exp
     Parse json got from Wildberries.
     @return: json part with product list
     """
-    json_resp_repr = f'json response:\n{helpers.json_dumps(json_resp)}'
+    json_resp_str = f'json response:\n{helpers.json_dumps(json_resp)}'
     if 'data' not in json_resp:
-        raise UnexpectedResponse(f'no "data" in {json_resp_repr}')
+        raise UnexpectedResponse(f'no "data" in {json_resp_str}')
     if 'products' not in json_resp['data']:
-        raise UnexpectedResponse(f'no "data->products" in {json_resp_repr}')
+        raise UnexpectedResponse(f'no "data->products" in {json_resp_str}')
     json_products = json_resp['data']['products']
 
     if single_expected or article_expected:
         if not json_products:
-            raise NoProductsFound(f'no products found, {json_resp_repr}')
+            raise NoProductsFound(f'no products found, {json_resp_str}')
         if len(json_products) > 1:
-            raise SeveralProductsFound(f'got several products, {json_resp_repr}')
+            raise SeveralProductsFound(f'got several products, {json_resp_str}')
 
     if article_expected:
         art_from_wb = str(json_products[0]['id'])
         if art_from_wb != str(article_expected):
-            raise UnexpectedResponse(f'got different article: {art_from_wb} != {article_expected}, {json_resp_repr}')
+            raise UnexpectedResponse(f'got different article: {art_from_wb} != {article_expected}, {json_resp_str}')
 
     return json_products
 
@@ -102,15 +102,33 @@ def fetch_product_details(article: str) -> tuple[datetime, dict[str, int | str |
         json_resp = resp.json()
         json_products = parse_json_with_products(json_resp, article_expected=article)
         json_product = json_products[0]
+        json_product_str = f'json product:\n{helpers.json_dumps(json_product)}'
         if 'extended' not in json_product:
-            raise UnexpectedResponse(f'no "extended" in json product:\n{helpers.json_dumps(json_product)}')
+            raise UnexpectedResponse(f'no "extended" in {json_product_str}')
+
+        json_product_extended = json_product['extended']
+        if 'clientSale' not in json_product_extended:
+            raise UnexpectedResponse(f'no "extended->clientSale" in {json_product_str}')
+
+        discount_client = Decimal(str(int(json_product_extended['clientSale'])))
+
+        if 'basicSale' in json_product_extended:
+            discount_base = Decimal(str(int(json_product_extended['basicSale'])))
+        else:
+            if 'sale' not in json_product:
+                raise UnexpectedResponse(f'neither "extended->basicSale" nor "sale" found in {json_product_str}')
+            if json_product['sale'] != discount_client:
+                raise UnexpectedResponse(f'"sale" != "clientSale" in {json_product_str}')
+
+            # if 'sale' == 'clientDale' => supplier discount is 0
+            discount_base = Decimal(0)
 
         product_properties = {
             'name': json_product['name'],
             'price': Decimal(str(int(json_product['priceU']) / 100.0)),
             'price_sale': Decimal(str(int(json_product['salePriceU']) / 100.0)),
-            'discount_base': Decimal(str(int(json_product['extended']['basicSale']))),
-            'discount_client': Decimal(str(int(json_product['extended']['clientSale']))),
+            'discount_base': discount_base,
+            'discount_client': discount_client,
         }
         return fetch_started_at, product_properties
 
