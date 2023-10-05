@@ -45,7 +45,7 @@ http_retries = 3
 http_base_retry_pause = 0.5
 
 # number of product listing pages to fetch for each search criterion
-products_num_pages_to_fetch = 2
+products_num_pages_to_fetch = 1
 
 # minimum number of products for reliable determination of SPP
 products_num_to_determine_spp = 12

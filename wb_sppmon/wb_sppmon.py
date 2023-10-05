@@ -21,7 +21,7 @@ from .settings import settings
 from .idx_utils import idx_update
 from .failure import Failure
 from .telegram import send_to_telegram_multiple
-from .wildberries import fetch_product_details, fetch_categories, fetch_subcategories
+from .wildberries import fetch_product_details, fetch_categories, fetch_subcategories, fetch_products
 from .wildberries import UnexpectedResponse
 from .models import AppRoot, get_app_root
 from .models.tcm import in_transaction
@@ -565,6 +565,41 @@ def add_article_to_slot(slots: list[PriceSlot], article: str, price: Decimal) ->
     return None
 
 
+def fill_slots_with_articles(slots: list[list[PriceSlot]]) -> None:
+    """
+    Fetches product articles for all given slots
+    @param slots: price slots grouped by subcategory and ordered by price_from
+    """
+    for slots_in_scat in slots:
+        scat = slots_in_scat[0].subcategory
+        shard, cat_id, xsubject = scat.category.shard, scat.category.id, scat.id  # filters for the given subcategory
+        num_pages = settings.products_num_pages_to_fetch
+
+        # minimal price suitable for filtering
+        price_min = slots_in_scat[0].price_from * (1 - settings.maximum_total_discount_base / 100)
+
+        price_to = slots_in_scat[-1].price_to  # starting from maximal price suitable for filtering
+        ratio = 1 - (slots_in_scat[0].price_to - slots_in_scat[0].price_from) / price_to  # decreasing ratio
+        while price_to > price_min:
+            price_from = price_to * ratio
+            # try to fetch products in this price range
+            try:
+                _, products_props = fetch_products(
+                    shard=shard, cat_id=cat_id, xsubject=xsubject,
+                    num_pages=num_pages, price_from=price_from, price_to=price_to
+                )
+                log.info(f'fetched {len(products_props)} in the price range {price_from:.2f} .. {price_to:.2f}')
+                articles_added = 0
+                for props in products_props:
+                    if add_article_to_slot(slots_in_scat, props['id'], props['price']):
+                        articles_added += 1
+                log.info(f'added to slots: {articles_added}')
+            except Exception as e:
+                log.warning(f'fetch failure: {e}')
+
+            price_to = price_from
+
+
 def main():
     parser = argparse.ArgumentParser(description='Wildberries SPP Monitor.')
     parser.add_argument('config_uri', help='The URI to the main configuration file.')
@@ -605,6 +640,9 @@ def main():
         with in_transaction(conn):
             slots = get_or_create_all_slots(app_root, params, failures)
         log.info(f'found {len(slots)} subcategories')
+
+        log.info('fetch articles and fill price slots')
+        fill_slots_with_articles(slots)
 
         if failures:
             with in_transaction(conn):
