@@ -4,11 +4,13 @@ Function to send message to Telegram user or chat
 from . import helpers
 
 URL_TELEGRAM_API = 'https://api.telegram.org/bot'
+MAX_TEXT_LENGTH = 4096
 
 
 def send_to_telegram(token: str, chat_id: int | str, text: str):
     """
-    Send a message to Telegram.
+    Send a message to Telegram. Breaks large text into pieces of allowed length.
+    Caution with big texts: Telegram does not accept broken markup.
     Raises an exception if the send fails.
     Message must be valid Telegram-limited HTML, use html.escape(...).
     @param token: bot token
@@ -20,15 +22,17 @@ def send_to_telegram(token: str, chat_id: int | str, text: str):
             chat_id = int(chat_id[9:])
 
     url = f'{URL_TELEGRAM_API}{token}/sendMessage'
-    data_json = {
-        'chat_id': chat_id,
-        'parse_mode': 'HTML',
-        'text': text
-    }
-    http_headers = {
-        'Content-Type': 'application/JSON; charset=utf-8'
-    }
-    helpers.http_request('POST', url, json=data_json, headers=http_headers)
+
+    for i in range(0, len(text), MAX_TEXT_LENGTH):
+        data_json = {
+            'chat_id': chat_id,
+            'parse_mode': 'HTML',
+            'text': text[i:i+MAX_TEXT_LENGTH]
+        }
+        http_headers = {
+            'Content-Type': 'application/JSON; charset=utf-8'
+        }
+        helpers.http_request('POST', url, json=data_json, headers=http_headers)
 
 
 def send_to_telegram_multiple(token: str, chat_ids: list[int | str], text: str) -> dict[str, Exception]:
