@@ -3,6 +3,7 @@ import logging
 import argparse
 import typing
 import html
+from decimal import Decimal
 from ZODB.Connection import Connection
 from datetime import datetime, timezone, timedelta
 from pyramid.paster import bootstrap, setup_logging
@@ -15,7 +16,7 @@ from BTrees.OOBTree import OOBTree
 from BTrees.IOBTree import IOBTree
 
 # local imports
-from .params import Params, ProductSubcategoryParams
+from .params import Params
 from .settings import settings
 from .idx_utils import idx_update
 from .failure import Failure
@@ -24,7 +25,7 @@ from .wildberries import fetch_product_details, fetch_categories, fetch_subcateg
 from .wildberries import UnexpectedResponse
 from .models import AppRoot, get_app_root
 from .models.tcm import in_transaction
-from .models.wb import LastUpdateResult, Product, Category, Subcategory
+from .models.wb import LastUpdateResult, Product, Category, Subcategory, PriceSlot
 
 log = logging.getLogger(__name__)
 
@@ -476,7 +477,7 @@ def send_admin_report(app_root: AppRoot, params: Params, failures: list[Failure]
         )
 
 
-def find_input_scats(app_root: AppRoot, params: Params, failures: list[Failure]) -> set[Subcategory]:
+def get_or_create_all_slots(app_root: AppRoot, params: Params, failures: list[Failure]) -> list[list[PriceSlot]]:
     """
     Search for all subcategories given in input parameters.
     If any of searches gives empty result, tries to update categories
@@ -484,58 +485,84 @@ def find_input_scats(app_root: AppRoot, params: Params, failures: list[Failure])
     @param app_root: App Root persistent object
     @param params: input parameters
     @param failures: output param, filled with failures if any
-    @return: set of matched subcategories
+    @return: list of persistent price slots grouped by matched subcategories and ordered by price_from
     """
-    failures_: list[Failure] = [];  """Temporary list of failures in case of searching retry"""
-    scats_matched_union: set[Subcategory] = set()
-    scats_params_no_matches: list[ProductSubcategoryParams] = []
 
-    def _find_scats():
-        for s_params_ in params.monitor_subcategories:
-            scats_matched_ = find_subcategories(app_root, s_params_.category_search, s_params_.subcategory_search)
-            if not scats_matched_:
-                failures_.append(Failure(s_params_.scat_search_descriptor, 'no subcategories found'))
-                scats_params_no_matches.append(s_params_)
-            elif len(scats_matched_) > settings.max_matched_subcategories:
-                failures_.append(Failure(
-                    s_params_.scat_search_descriptor,
-                    f'found {len(scats_matched_)} subcategories, '
-                    f'it is more then configured maximum of {settings.max_matched_subcategories}'
-                ))
-            else:
-                scats_matched_union.update(scats_matched_)
+    # first, determine if there are unknown categories or subcategories required to fetch from Wildberries
+    cat_names_or_ids_unknown = set()
+    for scats_params in params.monitor_subcategories:
+        if scats_params.category_search:
+            if not find_subcategories(app_root, scats_params.category_search, scats_params.subcategory_search):
+                cat_names_or_ids_unknown.add(scats_params.category_search)
 
-    _find_scats()
-    if scats_params_no_matches:
-        # try to fetch categories and relevant subcategories from Wildberries
-        cat_names_to_search = {x.category_search for x in scats_params_no_matches if x.category_search}
-        if cat_names_to_search:
-            log.info('try to fetch product categories from Wildberries')
+    if cat_names_or_ids_unknown:
+        # there are unknown names or ids: try to fetch all categories and relevant subcategories from Wildberries
+        log.info('try to fetch product categories from Wildberries')
+        try:
+            update_product_categories(app_root)
+        except Exception as e:
+            log.warning(f'failed to update categories: {e}')
+            failures.append(Failure('update categories', e))
+
+        # find all categories matched to any name or id in the list of unknown ones
+        cats_relevant = set()
+        for cat_name_or_id in cat_names_or_ids_unknown:
+            cats = find_categories(app_root, cat_name_or_id)
+            cats_relevant.update(cats)
+
+        for cat in cats_relevant:
+            log.info(f'fetching subcategories in category "{cat.entity_descriptor}" from Wildberries')
             try:
-                update_product_categories(app_root)
+                update_subcategories(app_root, cat)
             except Exception as e:
-                log.warning(f'failed to update categories: {e}')
-                failures.append(Failure('update categories', e))
+                log.warning(f'failed to update subcategories in {cat.entity_descriptor}: {e}')
+                failures.append(Failure(f'update subcategories in {cat.entity_descriptor}', e))
 
-            cats_relevant = set()
-            for cat_name in cat_names_to_search:
-                cats = find_categories(app_root, cat_name)
-                cats_relevant.update(cats)
-            for cat in cats_relevant:
-                log.info(f'fetching subcategories in category "{cat.name}" from Wildberries')
-                try:
-                    update_subcategories(app_root, cat)
-                except Exception as e:
-                    log.warning(f'failed to update subcategories in {cat.entity_descriptor}: {e}')
-                    failures.append(Failure(f'update subcategories in {cat.entity_descriptor}', e))
+    # search subcategories and get/create price slots
+    slots: list[list[PriceSlot]] = []
+    for scats_params in params.monitor_subcategories:
+        scats_matched = find_subcategories(app_root, scats_params.category_search, scats_params.subcategory_search)
+        if not scats_matched:
+            failures.append(Failure(scats_params.scat_search_descriptor, 'no subcategories found'))
+        elif len(scats_matched) > settings.max_matched_subcategories:
+            failures.append(Failure(
+                scats_params.scat_search_descriptor,
+                f'found {len(scats_matched)} subcategories, '
+                f'it is more then configured maximum of {settings.max_matched_subcategories}'
+            ))
+        else:
+            slots_in_scat: list[PriceSlot] = []
+            for scat in scats_matched:
+                # get/create price slots for each subcategory found
+                slots_in_scat += scat.get_or_create_slots(
+                    scats_params.price_min, scats_params.price_max, scats_params.price_step
+                )
+            slots.append(slots_in_scat)
 
-            # repeat search
-            failures_: list[Failure] = []
-            scats_matched_union: set[Subcategory] = set()
-            _find_scats()
+    return slots
 
-    failures += failures_
-    return scats_matched_union
+
+def add_article_to_slot(slots: list[PriceSlot], article: str, price: Decimal) -> PriceSlot | None:
+    """
+    Adds an article with a given price to the corresponding slot.
+    @param slots: list of price slots ordered by price_from
+    @param article: product article
+    @param price: product price
+    @return: PriceSlot article is added to, None if suitable slot is not found or article is already in the slot
+    """
+    for slot in slots:
+        if slot.price_from <= price < slot.price_to:
+            # ↑ suitable slot is found
+            if article not in slot.articles:
+                slot.articles.add(article)
+                # article is added to the suitable slot
+                return slot
+            else:
+                # article is already in the slot
+                return None
+
+    # suitable slot is not found
+    return None
 
 
 def main():
@@ -561,20 +588,23 @@ def main():
         # the cumulative list of all failures to report to admins
         failures: list[Failure] = []
 
-        update_all_categories_and_subcategories(app_root, conn, failures)
-        if failures:
-            log.warning("==== List of all failures in updating all categories ===")
-            for failure in failures:
-                log.warning(f'{failure.entity_descr} → {failure.message}')
-            failures.clear()
+        if len(app_root.id_to_category) == 0:
+            # database is empty, fetch all categories and subcategories
+            update_all_categories_and_subcategories(app_root, conn, failures)
+            if failures:
+                log.warning("=== ↓ === a list of all failures in updating all categories === ↓ ===")
+                for failure in failures:
+                    log.warning(f'{failure.entity_descr} → {failure.message}')
+                log.warning("=== ↑ === a list of all failures in updating all categories === ↑ ===")
+                failures.clear()
 
         log.info('try to fetch product updates for all configured articles')
         monitor_articles(app_root, params, conn, failures)
 
         log.info('try to find all subcategories matched to configured')
         with in_transaction(conn):
-            subcategories = find_input_scats(app_root, params, failures)  # TODO: must return list[Slots]
-        log.info(f'found {len(subcategories)} subcategories')
+            slots = get_or_create_all_slots(app_root, params, failures)
+        log.info(f'found {len(slots)} subcategories')
 
         if failures:
             with in_transaction(conn):

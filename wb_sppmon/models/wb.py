@@ -25,7 +25,7 @@ class LastUpdateResult:
 
 class FetchedEntity(Persistent):
     """Entity fetched from Wildberries"""
-    def __init__(self, fetched_at: datetime):
+    def __init__(self, fetched_at: datetime = None):
         self.fetched_at = fetched_at;            """Date/time entity properties were fetched from Wildberries"""
         self._v_old_values: dict | None = None;  """Previous values of changed fields, not persist"""
 
@@ -88,6 +88,7 @@ class Subcategory(FetchedEntity):
         self.id = id_;                     """Subcategory ID"""
         self.name = name;                  """Name of the subcategory"""
         self.category = category;          """The category this subcategory belongs to"""
+        self._price_range_to_slot = None
 
     def __str__(self):
         return f'{self.id}: {self.name}'
@@ -96,6 +97,37 @@ class Subcategory(FetchedEntity):
     def entity_descriptor(self) -> str:
         """Human-readable subcategory descriptor"""
         return f'{self.category.id}:{self.category.name} → {self.id}:{self.name}'
+
+    @property
+    def price_range_to_slot(self) -> dict[tuple[Decimal, Decimal], 'PriceSlot']:
+        """OOBTree: price range => subcategory PriceSlot entity"""
+        if not hasattr(self, '_price_range_to_slot') or self._price_range_to_slot is None:
+            self._price_range_to_slot = OOBTree()
+        return self._price_range_to_slot
+
+    def get_or_create_slots(self, price_min: Decimal, price_max: Decimal, step: Decimal) -> list['PriceSlot']:
+        """
+        Get PriceSlot entities from the database or creates new ones if they don't already exist
+        @return: list of Price Slots ordered by price_from
+        """
+        slots = []
+        price_from = price_min
+
+        while price_from < price_max:
+            price_to = price_from + step
+            if price_to > price_max:
+                price_to = price_max
+
+            if (price_from, price_to) in self.price_range_to_slot:
+                slot = self.price_range_to_slot[(price_from, price_to)]
+            else:
+                slot = PriceSlot(self, price_from, price_to)
+                self.price_range_to_slot[(price_from, price_to)] = slot
+
+            slots.append(slot)
+            price_from = price_to
+
+        return slots
 
 
 class Category(FetchedEntity):
@@ -148,3 +180,21 @@ class Category(FetchedEntity):
     @subcategories_last_update.setter
     def subcategories_last_update(self, value: LastUpdateResult):
         self._subcategories_last_update = value
+
+
+class PriceSlot(FetchedEntity):
+    """Subcategory price slot with determined client discount"""
+    def __init__(self, subcategory: Subcategory, price_from: Decimal, price_to: Decimal):
+        super().__init__()
+        self.subcategory = subcategory
+        self.price_from = price_from
+        self.price_to = price_to
+        self.client_discount: Decimal | None = None
+        self._v_articles: set[str] = set();  """product articles, not persist"""
+
+    @property
+    def articles(self) -> set[str]:
+        """A set of product articles, not persist"""
+        if not hasattr(self, '_v_articles') or self._v_articles is None:
+            self._v_articles: set[str] = set()
+        return self._v_articles
