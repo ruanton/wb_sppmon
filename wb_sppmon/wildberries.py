@@ -276,7 +276,7 @@ def fetch_subcategories(shard: str, cat_filter: str) -> tuple[datetime, list[dic
         json_filters = json_resp['data']['filters']
         json_filters_selected = [x for x in json_filters if x['name'] == req_name or x['key'] == req_key]
         if not json_filters_selected:
-            raise UnexpectedResponse(f'filter with the name "{req_name}" was not found in {json_resp_repr}')
+            return fetch_started_at, []  # no subcategories in this category
         if not json_filters_selected:
             raise UnexpectedResponse(f'several filters with the name "{req_name}" were found in {json_resp_repr}')
         json_filter = json_filters_selected[0]
