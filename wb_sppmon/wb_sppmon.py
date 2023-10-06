@@ -718,6 +718,9 @@ def main():
         # the cumulative list of all failures to report to admins
         failures: list[Failure] = []
 
+        log.info('try to fetch product updates for all configured articles')
+        monitor_articles(app_root, params, conn, failures)
+
         if len(app_root.id_to_category) == 0:
             # database is empty, fetch all categories and subcategories
             update_all_categories_and_subcategories(app_root, conn, failures)
@@ -727,9 +730,6 @@ def main():
                     log.warning(f'{failure.entity_descr} → {failure.message}')
                 log.warning("=== ↑ === a list of all failures in updating all categories === ↑ ===")
                 failures.clear()
-
-        log.info('try to fetch product updates for all configured articles')
-        monitor_articles(app_root, params, conn, failures)
 
         log.info('try to determine SPPs for all configured subcategories and price ranges')
         monitor_slots(app_root, params, conn, failures)
