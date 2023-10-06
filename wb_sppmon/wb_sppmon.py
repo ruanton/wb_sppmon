@@ -620,14 +620,14 @@ def determine_spp_in_slots(slots: list[list[PriceSlot]], failures: list[Failure]
     def validate_enough_products(num: int) -> bool:
         if num >= settings.products_num_to_determine_spp:
             return True
-        failures.append(Failure(slot.entity_descriptor, f'not enough products to reliably determine SPP: {num}'))
+        failures.append(Failure(slot.entity_descriptor, f'not enough products: {num}'))
         return False
 
     def calc_and_save_spp(slot_: PriceSlot, spp_to_num: dict) -> bool:
         max_num = max(x for x in spp_to_num.values())
         percent = Decimal(max_num) / settings.products_num_to_determine_spp * 100
         if percent < settings.products_num_percent_min_determine_spp:
-            failures.append(Failure(slot.entity_descriptor, f'not large enough percent to determine SPP: {percent}'))
+            failures.append(Failure(slot.entity_descriptor, f'not large enough percent: {percent}'))
             return False
         else:
             spp_ = [x for x, v in spp_to_num.items() if v == max_num][0]
