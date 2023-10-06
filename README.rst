@@ -8,7 +8,7 @@ Getting Started
   current directory should be the same as this ``README.rst`` file and ``pyproject.toml``.
   Create a Python virtual environment, if not already created::
 
-    python3 -m venv env
+    python3 -m venv venv
 
 - Upgrade packaging tools::
 
