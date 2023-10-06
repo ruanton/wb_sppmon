@@ -29,10 +29,10 @@ Getting Started
 - Create configuration files from samples::
 
     cp config/samples/wb_sppmon.ini.sample config/wb_sppmon.ini
-    cp config/samples/admin_emails.lst.sample config/admin_emails.lst
-    cp config/samples/report_emails.lst.sample config/report_emails.lst
-    cp config/samples/article_numbers.lst.sample config/article_numbers.lst
-    cp config/samples/product_categories.lst.sample config/product_categories.lst
+    cp config/samples/contacts_admins.lst.sample config/contacts_admins.lst
+    cp config/samples/contacts_users.lst.sample config/contacts_users.lst
+    cp config/samples/monitor_articles.lst.sample config/monitor_articles.lst
+    cp config/samples/monitor_subcategories.lst.sample config/monitor_subcategories.lst
 
 - Run project's script::
 
