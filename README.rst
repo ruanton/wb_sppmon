@@ -38,3 +38,8 @@ Getting Started
 
     ./venv/bin/wb_sppmon config/wb_sppmon.ini
 
+
+- Example bash command to run via cron::
+
+    ps aux | grep -v grep | grep -q wb_sppmon.ini || /root/wb_sppmon/venv/bin/wb_sppmon /root/wb_sppmon/config/wb_sppmon.ini >>/root/wb_sppmon.log 2>&1 &
+
