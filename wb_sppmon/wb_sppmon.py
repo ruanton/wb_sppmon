@@ -584,7 +584,7 @@ def fill_slots_with_articles(slots: list[list[PriceSlot]]) -> None:
         num_pages = settings.products_num_pages_to_fetch
 
         # minimal price suitable for filtering
-        price_min = slots_in_scat[0].price_from * (1 - settings.maximum_total_discount_base / 100)
+        price_min = slots_in_scat[0].price_from * (1 - settings.maximum_client_discount_base / 100)
 
         price_to = slots_in_scat[-1].price_to  # starting from maximal price suitable for filtering
         ratio = 1 - (slots_in_scat[0].price_to - slots_in_scat[0].price_from) / price_to  # decreasing ratio
