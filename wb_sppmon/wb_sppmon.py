@@ -599,7 +599,7 @@ def fill_slots_with_articles(slots: list[list[PriceSlot]]) -> None:
                 log.info(f'fetched {len(products_props)} in the price range {price_from:.2f} .. {price_to:.2f}')
                 articles_added = 0
                 for props in products_props:
-                    if add_article_to_slot(slots_in_scat, props['id'], props['price']):
+                    if add_article_to_slot(slots_in_scat, props['id'], props['price_sale']):
                         articles_added += 1
                 log.info(f'added to slots: {articles_added}')
             except Exception as e:
@@ -627,7 +627,7 @@ def determine_spp_in_slots(slots: list[list[PriceSlot]], failures: list[Failure]
         max_num = max(x for x in spp_to_num.values())
         percent = Decimal(max_num) / settings.products_num_to_determine_spp * 100
         if percent < settings.products_num_percent_min_determine_spp:
-            failures.append(Failure(slot.entity_descriptor, f'not large enough percent: {percent}'))
+            failures.append(Failure(slot.entity_descriptor, f'not large enough percent: {percent:.2f}'))
             return False
         else:
             spp_ = [x for x, v in spp_to_num.items() if v == max_num][0]

@@ -127,7 +127,12 @@ class Settings:
 
     @property
     def maximum_total_discount_base(self) -> decimal.Decimal:
-        """Maximal total discount to start from"""
+        """Maximal total discount to start from (not used)"""
+        return self._get_decimal_param()
+
+    @property
+    def maximum_client_discount_base(self) -> decimal.Decimal:
+        """Maximal client discount"""
         return self._get_decimal_param()
 
 

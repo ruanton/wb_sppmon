@@ -53,8 +53,11 @@ products_num_to_determine_spp = 12
 # minimum percentage of products with the same SPP to reliable determination of SPP
 products_num_percent_min_determine_spp = 75
 
-# maximal total discount to start from
+# maximal total discount (not used)
 maximum_total_discount_base = 90
+
+# maximal client discount
+maximum_client_discount_base = 30
 
 
 ###

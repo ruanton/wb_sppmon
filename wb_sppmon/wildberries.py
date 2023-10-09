@@ -185,6 +185,10 @@ def fetch_products(
         url = URL_WB_PRODUCTS.format(shard=shard)
         log.debug(f'fetch products details from "{url}" + filters, and parse response')
         resp = helpers.http_get(url, params=filters)
+        if resp.content and len(parse_json_with_products(resp.json())) == 0:
+            # no products, retrying
+            resp = helpers.http_get(url, params=filters)
+
         if not resp.content:
             raise UnexpectedResponse('no content')
         json_resp = resp.json()
