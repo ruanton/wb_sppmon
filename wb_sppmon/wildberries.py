@@ -107,10 +107,10 @@ def fetch_product_details(article: str) -> tuple[datetime, dict[str, int | str |
             raise UnexpectedResponse(f'no "extended" in {json_product_str}')
 
         json_product_extended = json_product['extended']
-        if 'clientSale' not in json_product_extended:
-            raise UnexpectedResponse(f'no "extended->clientSale" in {json_product_str}')
-
-        discount_client = Decimal(str(int(json_product_extended['clientSale'])))
+        if 'clientSale' in json_product_extended:
+            discount_client = Decimal(str(int(json_product_extended['clientSale'])))
+        else:
+            discount_client = Decimal(0)
 
         if 'basicSale' in json_product_extended:
             discount_base = Decimal(str(int(json_product_extended['basicSale'])))
@@ -122,6 +122,12 @@ def fetch_product_details(article: str) -> tuple[datetime, dict[str, int | str |
 
             # if 'sale' == 'clientDale' => supplier discount is 0
             discount_base = Decimal(0)
+
+        if 'clientSale' not in json_product_extended:
+            if 'sale' not in json_product:
+                raise UnexpectedResponse(f'neither "extended->clientSale" nor "sale" found in {json_product_str}')
+            if json_product['sale'] != discount_base:
+                raise UnexpectedResponse(f'"sale" != "basicSale" in {json_product_str}')
 
         product_properties = {
             'name': json_product['name'],
